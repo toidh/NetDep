@@ -763,19 +763,24 @@ export const App = {
             if (result.updatedProgress.p5) this.sites[siteIndex]['Tiến độ 5G'] = result.updatedProgress.p5;
             
             // Recalculate status locally
+            // So khớp không phân biệt hoa/thường & khoảng trắng thừa — khớp với cách
+            // chuẩn hoá phía Apps Script (checkinSite) để marker luôn đổi màu đúng
+            // ngay khi Check-in, kể cả khi cột "Phân loại" trên Sheet gõ lệch dấu cách.
             const classification = String(this.sites[siteIndex]['Phân loại'] || '').trim();
+            const normClassification = classification.toUpperCase().replace(/\s+/g, '');
             let p4g = String(this.sites[siteIndex]['Tiến độ 4G'] || '').trim();
             let p5g = String(this.sites[siteIndex]['Tiến độ 5G'] || '').trim();
             let trangThai = 'Chưa hoàn thành';
-            if (classification === '5G_4G Z') {
-              if (p4g === 'Hoàn thành' && p5g === 'Hoàn thành') trangThai = 'Hoàn thành';
-              else if (p4g === 'Đang thực hiện' || p5g === 'Đang thực hiện' || p4g === 'Hoàn thành' || p5g === 'Hoàn thành') trangThai = 'Đang thực hiện';
-            } else if (classification === '5G Z') {
+            if (normClassification === '5GZ') {
               if (p5g === 'Hoàn thành') trangThai = 'Hoàn thành';
               else if (p5g === 'Đang thực hiện') trangThai = 'Đang thực hiện';
-            } else if (classification === '4G Z') {
+            } else if (normClassification === '4GZ') {
               if (p4g === 'Hoàn thành') trangThai = 'Hoàn thành';
               else if (p4g === 'Đang thực hiện') trangThai = 'Đang thực hiện';
+            } else {
+              // '5G_4G Z' hoặc phân loại không xác định — xét chung cả 2 tiến độ
+              if (p4g === 'Hoàn thành' && p5g === 'Hoàn thành') trangThai = 'Hoàn thành';
+              else if (p4g === 'Đang thực hiện' || p5g === 'Đang thực hiện' || p4g === 'Hoàn thành' || p5g === 'Hoàn thành') trangThai = 'Đang thực hiện';
             }
             this.sites[siteIndex]['Status'] = trangThai;
             
@@ -2220,29 +2225,13 @@ export const App = {
               panzoom.zoom(panzoom.getScale() * factor, { animate: false });
             }, { passive: false });
 
-            // Pinch 2 ngón: chỉ đổi scale theo khoảng cách 2 ngón, không pan theo tâm pinch
-            let pinchStartDist = null;
-            let pinchStartScale = 1;
-            const touchDist = (touches) => {
-              const dx = touches[0].clientX - touches[1].clientX;
-              const dy = touches[0].clientY - touches[1].clientY;
-              return Math.hypot(dx, dy);
-            };
-            content.addEventListener('touchstart', (e) => {
-              if (e.touches.length === 2) {
-                pinchStartDist = touchDist(e.touches);
-                pinchStartScale = panzoom.getScale();
-              }
-            }, { passive: true });
-            content.addEventListener('touchmove', (e) => {
-              if (e.touches.length === 2 && pinchStartDist) {
-                e.preventDefault();
-                panzoom.zoom(pinchStartScale * (touchDist(e.touches) / pinchStartDist), { animate: false });
-              }
-            }, { passive: false });
-            content.addEventListener('touchend', (e) => {
-              if (e.touches.length < 2) pinchStartDist = null;
-            });
+            // Pinch 2 ngón: Panzoom tự xử lý sẵn (bind pointerdown/pointermove nội bộ),
+            // tự tính đúng theo khoảng cách 2 ngón VÀ neo đúng vào điểm giữa 2 ngón
+            // (zoomToPoint) — đây là cảm giác pinch-zoom "bình thường". Trước đây có thêm
+            // 1 lớp touchstart/touchmove tự viết ở đây gọi panzoom.zoom() KHÔNG kèm điểm
+            // focal, chạy song song và ghi đè lên kết quả zoom (có điểm neo) của thư viện
+            // mỗi frame — đó là nguyên nhân ảnh "nhảy" liên tục khi pinch trên điện thoại.
+            // Đã bỏ lớp tự viết này, để thư viện tự xử lý pinch là đủ.
 
             let lastTap = 0;
             img.addEventListener('click', (e) => {

@@ -214,22 +214,24 @@ export const DataService = {
       sites[index]['Ngày cập nhật'] = new Date().toLocaleString('vi-VN');
 
       // Calculate completion
+      // So khớp không phân biệt hoa/thường & khoảng trắng thừa (đồng bộ với app.js/Code.gs)
       const classification = String(sites[index]['Phân loại'] || '').trim();
+      const normClassification = classification.toUpperCase().replace(/\s+/g, '');
       let p4g = String(siteData.progress4G || '').trim();
       let p5g = String(siteData.progress5G || '').trim();
       if (p4g === '') p4g = 'Chưa thực hiện';
       if (p5g === '') p5g = 'Chưa thực hiện';
 
       let trangThai = 'Chưa thực hiện';
-      if (classification === '5G_4G Z') {
-        if (p4g === 'Hoàn thành' && p5g === 'Hoàn thành') trangThai = 'Hoàn thành';
-        else if (p4g === 'Đang thực hiện' || p5g === 'Đang thực hiện' || p4g === 'Hoàn thành' || p5g === 'Hoàn thành') trangThai = 'Đang thực hiện';
-      } else if (classification === '5G Z') {
+      if (normClassification === '5GZ') {
         if (p5g === 'Hoàn thành') trangThai = 'Hoàn thành';
         else if (p5g === 'Đang thực hiện') trangThai = 'Đang thực hiện';
-      } else if (classification === '4G Z') {
+      } else if (normClassification === '4GZ') {
         if (p4g === 'Hoàn thành') trangThai = 'Hoàn thành';
         else if (p4g === 'Đang thực hiện') trangThai = 'Đang thực hiện';
+      } else {
+        if (p4g === 'Hoàn thành' && p5g === 'Hoàn thành') trangThai = 'Hoàn thành';
+        else if (p4g === 'Đang thực hiện' || p5g === 'Đang thực hiện' || p4g === 'Hoàn thành' || p5g === 'Hoàn thành') trangThai = 'Đang thực hiện';
       }
 
       sites[index]['Status'] = trangThai;
@@ -319,22 +321,24 @@ export const DataService = {
       sites[index]['Ngày cập nhật'] = new Date().toLocaleString('vi-VN');
 
       // Calculate completion
+      // So khớp không phân biệt hoa/thường & khoảng trắng thừa (đồng bộ với app.js/Code.gs)
       const classification = String(sites[index]['Phân loại'] || '').trim();
+      const normClassification = classification.toUpperCase().replace(/\s+/g, '');
       let p4g = String(siteData.progress4G || '').trim();
       let p5g = String(siteData.progress5G || '').trim();
       if (p4g === '') p4g = 'Chưa thực hiện';
       if (p5g === '') p5g = 'Chưa thực hiện';
 
       let trangThai = 'Chưa thực hiện';
-      if (classification === '5G_4G Z') {
-        if (p4g === 'Hoàn thành' && p5g === 'Hoàn thành') trangThai = 'Hoàn thành';
-        else if (p4g === 'Đang thực hiện' || p5g === 'Đang thực hiện' || p4g === 'Hoàn thành' || p5g === 'Hoàn thành') trangThai = 'Đang thực hiện';
-      } else if (classification === '5G Z') {
+      if (normClassification === '5GZ') {
         if (p5g === 'Hoàn thành') trangThai = 'Hoàn thành';
         else if (p5g === 'Đang thực hiện') trangThai = 'Đang thực hiện';
-      } else if (classification === '4G Z') {
+      } else if (normClassification === '4GZ') {
         if (p4g === 'Hoàn thành') trangThai = 'Hoàn thành';
         else if (p4g === 'Đang thực hiện') trangThai = 'Đang thực hiện';
+      } else {
+        if (p4g === 'Hoàn thành' && p5g === 'Hoàn thành') trangThai = 'Hoàn thành';
+        else if (p4g === 'Đang thực hiện' || p5g === 'Đang thực hiện' || p4g === 'Hoàn thành' || p5g === 'Hoàn thành') trangThai = 'Đang thực hiện';
       }
 
       sites[index]['Status'] = trangThai;

@@ -740,6 +740,26 @@ html, body {
   min-width: 140px;
 }
 
+/* Filter Tỉnh/Đối tác của Dashboard & Report Check-in: luôn giữ 1 hàng, không xuống dòng.
+   Bỏ min-width cố định (140px) để 2 select co giãn vừa màn hình mobile hẹp. */
+.dash-filter-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.dash-filter-row label {
+  flex-shrink: 0;
+}
+
+.dash-filter-row select.map-filter-select {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+  padding: 6px 6px;
+}
+
 .map-filter-select:focus {
   border-color: var(--color-blue);
 }

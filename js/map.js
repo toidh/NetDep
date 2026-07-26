@@ -74,6 +74,12 @@ export const MapManager = {
 
     // Save map state on move and render viewport
     this.map.on('moveend', () => {
+      // Safety net: nếu zoomend không fire đúng lúc pinch-zoom trên mobile (rất hay gặp),
+      // overlayPane có thể bị kẹt ở opacity 0 -> marker/sector "biến mất". moveend luôn
+      // fire sau đó nên phục hồi lại ở đây.
+      const overlayPane = this.map.getPane('overlayPane');
+      if (overlayPane) overlayPane.style.opacity = '1';
+
       const c = this.map.getCenter();
       Storage.setMapState([c.lat, c.lng], this.map.getZoom());
       if (typeof Auth !== 'undefined' && !['view_limited', 'doitac'].includes(Auth.getRole())) {
@@ -684,23 +690,41 @@ export const MapManager = {
       const editIcon = (field, fieldVal) => canEditSector
         ? `<span style="cursor:pointer;opacity:0.6;font-size:11px;margin-left:4px;" onclick="window.App.editSectorField('${siteName}', '${sectorName}', '${field}', '${String(fieldVal).replace(/'/g,"\\'")}', '${type}')">✏️</span>`
         : '';
-      shape.bindPopup(`
-        <div style="font-family:'Inter',sans-serif;font-size:12px;min-width:180px;">
+      // Grid 2 cột (thay vì bảng 1 cột 9 dòng) để popup thấp hơn hẳn — trên mobile
+      // popup cao khiến Leaflet tự pan bản đồ đi xa để "nhét vừa", tạo cảm giác
+      // chọn sector là bản đồ bị nhảy sang chỗ khác.
+      const popupHtml = `
+        <div style="font-family:'Inter',sans-serif;font-size:12px;min-width:210px;max-width:250px;">
           <div style="font-weight:700;font-size:13px;margin-bottom:6px;color:${color};">${sectorName}</div>
-          <table style="width:100%;border-collapse:collapse;">
-            <tr><td style="color:#94a3b8;padding:2px 8px 2px 0;">Tech</td><td style="font-weight:700;color:${color};">${type.toUpperCase()}</td></tr>
-            <tr><td style="color:#94a3b8;padding:2px 8px 2px 0;">Cấu hình mới</td><td style="font-weight:600;">${val(sector['Cấu hình mới'])} ${editIcon('cauHinhMoi', val(sector['Cấu hình mới']))}</td></tr>
-            <tr><td style="color:#94a3b8;padding:2px 8px 2px 0;">Độ cao cột</td><td style="font-weight:600;">${val(sector['Độ cao cột'])} m ${editIcon('doCaoCot', val(sector['Độ cao cột']))}</td></tr>
-            <tr><td style="color:#94a3b8;padding:2px 8px 2px 0;">Cao/chân cột</td><td style="font-weight:600;">${val(sector['Độ cao so với chân cột'])} m ${editIcon('doCaoChanCot', val(sector['Độ cao so với chân cột']))}</td></tr>
-            <tr><td style="color:#94a3b8;padding:2px 8px 2px 0;">Cao/mặt đất</td><td style="font-weight:600;">${val(sector['Độ cao so với mặt đất'])} m ${editIcon('doCaoMatDat', val(sector['Độ cao so với mặt đất']))}</td></tr>
-            <tr><td style="color:#94a3b8;padding:2px 8px 2px 0;">Độ cao GPS/chân cột</td><td style="font-weight:600;">${val(sector['Độ cao GPS so với chân cột'])} m ${editIcon('doCaoGPSChanCot', val(sector['Độ cao GPS so với chân cột']))}</td></tr>
-            <tr><td style="color:#94a3b8;padding:2px 8px 2px 0;">Azimuth</td><td style="font-weight:600;">${val(sector['Azimuth'])}° ${editIcon('azimuth', val(sector['Azimuth']))}</td></tr>
-            <tr><td style="color:#94a3b8;padding:2px 8px 2px 0;">Tilt cơ</td><td style="font-weight:600;">${val(sector['Tilt cơ'])}° ${editIcon('tiltCo', val(sector['Tilt cơ']))}</td></tr>
-            <tr><td style="color:#94a3b8;padding:2px 8px 2px 0;">Tilt điện</td><td style="font-weight:600;">${val(sector['Tilt điện'])}° ${editIcon('tiltDien', val(sector['Tilt điện']))}</td></tr>
-          </table>
+          <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:4px 6px;">
+            <span style="color:#94a3b8;">Tech</span><span style="font-weight:700;color:${color};">${type.toUpperCase()}</span>
+            <span style="color:#94a3b8;">Cấu hình</span><span style="font-weight:600;">${val(sector['Cấu hình mới'])}${editIcon('cauHinhMoi', val(sector['Cấu hình mới']))}</span>
+            <span style="color:#94a3b8;">Cao cột</span><span style="font-weight:600;">${val(sector['Độ cao cột'])}m${editIcon('doCaoCot', val(sector['Độ cao cột']))}</span>
+            <span style="color:#94a3b8;">Cao/chân</span><span style="font-weight:600;">${val(sector['Độ cao so với chân cột'])}m${editIcon('doCaoChanCot', val(sector['Độ cao so với chân cột']))}</span>
+            <span style="color:#94a3b8;">Cao/đất</span><span style="font-weight:600;">${val(sector['Độ cao so với mặt đất'])}m${editIcon('doCaoMatDat', val(sector['Độ cao so với mặt đất']))}</span>
+            <span style="color:#94a3b8;">GPS/chân</span><span style="font-weight:600;">${val(sector['Độ cao GPS so với chân cột'])}m${editIcon('doCaoGPSChanCot', val(sector['Độ cao GPS so với chân cột']))}</span>
+            <span style="color:#94a3b8;">Azimuth</span><span style="font-weight:600;">${val(sector['Azimuth'])}°${editIcon('azimuth', val(sector['Azimuth']))}</span>
+            <span style="color:#94a3b8;">Tilt cơ</span><span style="font-weight:600;">${val(sector['Tilt cơ'])}°${editIcon('tiltCo', val(sector['Tilt cơ']))}</span>
+            <span style="color:#94a3b8;">Tilt điện</span><span style="font-weight:600;">${val(sector['Tilt điện'])}°${editIcon('tiltDien', val(sector['Tilt điện']))}</span>
+          </div>
         </div>
-      `);
+      `;
+      // autoPan:false — không cho Leaflet tự pan bản đồ khi mở popup (đây chính là
+      // nguyên nhân cảm giác "nhảy đi chỗ khác" khi chọn sector trên mobile).
+      shape.bindPopup(popupHtml, { autoPan: false, maxWidth: 260 });
       shape.addTo(this.sectorLayer);
+
+      // Vùng chạm ẩn, kích thước cố định theo pixel (không co lại khi zoom out) đặt
+      // giữa cánh sector — cánh sector là hình quạt mỏng nên rất khó bấm trúng trên
+      // mobile; vùng tròn 16px này giúp bấm trúng đúng sector, không lệch sang trạm khác.
+      const hitPoint = this.destinationPoint(lat, lng, azimuth, length * 0.65);
+      L.circleMarker(hitPoint, {
+        radius: 16,
+        stroke: false,
+        fillOpacity: 0,
+        interactive: true,
+      }).bindPopup(popupHtml, { autoPan: false, maxWidth: 260 }).addTo(this.sectorLayer);
+
       count++;
     }
   },
@@ -787,23 +811,32 @@ export const MapManager = {
 
       const val = (v) => (v !== undefined && v !== null && String(v).trim() !== '') ? v : '-';
       const sectorName = sector['Sector'] || 'Unknown';
-      shape.bindPopup(`
-        <div style="font-family:'Inter',sans-serif;font-size:12px;min-width:180px;">
+      const popupHtml = `
+        <div style="font-family:'Inter',sans-serif;font-size:12px;min-width:210px;max-width:250px;">
           <div style="font-weight:700;font-size:13px;margin-bottom:6px;color:${color};">${sectorName}</div>
-          <table style="width:100%;border-collapse:collapse;">
-            <tr><td style="color:#94a3b8;padding:2px 8px 2px 0;">Tech</td><td style="font-weight:700;color:${color};">${type.toUpperCase()}</td></tr>
-            <tr><td style="color:#94a3b8;padding:2px 8px 2px 0;">Cấu hình mới</td><td style="font-weight:600;">${val(sector['Cấu hình mới'])}</td></tr>
-            <tr><td style="color:#94a3b8;padding:2px 8px 2px 0;">Độ cao cột</td><td style="font-weight:600;">${val(sector['Độ cao cột'])} m</td></tr>
-            <tr><td style="color:#94a3b8;padding:2px 8px 2px 0;">Cao/chân cột</td><td style="font-weight:600;">${val(sector['Độ cao so với chân cột'])} m</td></tr>
-            <tr><td style="color:#94a3b8;padding:2px 8px 2px 0;">Cao/mặt đất</td><td style="font-weight:600;">${val(sector['Độ cao so với mặt đất'])} m</td></tr>
-            <tr><td style="color:#94a3b8;padding:2px 8px 2px 0;">Độ cao GPS/chân cột</td><td style="font-weight:600;">${val(sector['Độ cao GPS so với chân cột'])} m</td></tr>
-            <tr><td style="color:#94a3b8;padding:2px 8px 2px 0;">Azimuth</td><td style="font-weight:600;">${val(sector['Azimuth'])}°</td></tr>
-            <tr><td style="color:#94a3b8;padding:2px 8px 2px 0;">Tilt cơ</td><td style="font-weight:600;">${val(sector['Tilt cơ'])}°</td></tr>
-            <tr><td style="color:#94a3b8;padding:2px 8px 2px 0;">Tilt điện</td><td style="font-weight:600;">${val(sector['Tilt điện'])}°</td></tr>
-          </table>
+          <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:4px 6px;">
+            <span style="color:#94a3b8;">Tech</span><span style="font-weight:700;color:${color};">${type.toUpperCase()}</span>
+            <span style="color:#94a3b8;">Cấu hình</span><span style="font-weight:600;">${val(sector['Cấu hình mới'])}</span>
+            <span style="color:#94a3b8;">Cao cột</span><span style="font-weight:600;">${val(sector['Độ cao cột'])}m</span>
+            <span style="color:#94a3b8;">Cao/chân</span><span style="font-weight:600;">${val(sector['Độ cao so với chân cột'])}m</span>
+            <span style="color:#94a3b8;">Cao/đất</span><span style="font-weight:600;">${val(sector['Độ cao so với mặt đất'])}m</span>
+            <span style="color:#94a3b8;">GPS/chân</span><span style="font-weight:600;">${val(sector['Độ cao GPS so với chân cột'])}m</span>
+            <span style="color:#94a3b8;">Azimuth</span><span style="font-weight:600;">${val(sector['Azimuth'])}°</span>
+            <span style="color:#94a3b8;">Tilt cơ</span><span style="font-weight:600;">${val(sector['Tilt cơ'])}°</span>
+            <span style="color:#94a3b8;">Tilt điện</span><span style="font-weight:600;">${val(sector['Tilt điện'])}°</span>
+          </div>
         </div>
-      `);
+      `;
+      shape.bindPopup(popupHtml, { autoPan: false, maxWidth: 260 });
       shape.addTo(this.sectorLayer);
+
+      const hitPoint = this.destinationPoint(lat, lng, azimuth, length * 0.65);
+      L.circleMarker(hitPoint, {
+        radius: 16,
+        stroke: false,
+        fillOpacity: 0,
+        interactive: true,
+      }).bindPopup(popupHtml, { autoPan: false, maxWidth: 260 }).addTo(this.sectorLayer);
     });
   },
 
