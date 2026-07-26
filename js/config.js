@@ -42,6 +42,10 @@ export const AppConfig = {
   // ⚠️ DÁN FOLDER ID GOOGLE DRIVE CHỨA SƠ ĐỒ ĐẤU NỐI VÀO ĐÂY (phải trùng với Code.gs):
   DIAGRAMS_FOLDER_ID: '1_2KVKMY8hC3jVLnjHnGIg6j6RxYf0t75',
 
+  // ⚠️ Folder Drive chứa File Cấu Hình, tra theo cột "File Name" trong sheet Config
+  // (phải trùng với CONFIG_FILES_FOLDER_ID trong Code.gs):
+  CONFIG_FILES_FOLDER_ID: '1YNw_fkMkAeYZ8_Z-HLbur9Vly7Vbm97g',
+
   // Weather API (Open-Meteo - free, no API key required)
   WEATHER_API: 'https://api.open-meteo.com/v1/forecast',
 
