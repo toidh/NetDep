@@ -50,8 +50,8 @@
   <div id="checkin-report-modal" class="dashboard-overlay">
     <div class="dashboard-container">
       <div class="dashboard-header">
-        <h2 style="display:flex;align-items:center;gap:8px;font-size:16px;font-weight:700;color:#fff;">
-          🗓️ Báo cáo thống kê Check-in (<span id="checkin-report-date"></span>)
+        <h2 style="display:flex;align-items:center;gap:8px;font-size:16px;font-weight:700;color:#fff;white-space:nowrap;">
+          🗓️ Thống kê Check-in
         </h2>
         <button id="close-checkin-report-btn" class="modal-close-btn">✕</button>
       </div>
@@ -84,12 +84,16 @@
           <!-- Chart Theo Tỉnh -->
           <div style="flex:1;min-width:280px;height:280px;position:relative;background:rgba(255,255,255,0.03);padding:15px;border-radius:12px;border:1px solid var(--border-glass);">
             <div style="font-size:13px;font-weight:600;color:#fff;margin-bottom:8px;border-left:3px solid #3b82f6;padding-left:8px;">Trạm Check-in theo Tỉnh</div>
-            <div style="height:210px;position:relative;"><canvas id="checkin-province-chart"></canvas></div>
+            <div style="height:210px;overflow-x:auto;overflow-y:hidden;">
+              <div style="min-width:400px;height:100%;position:relative;"><canvas id="checkin-province-chart"></canvas></div>
+            </div>
           </div>
           <!-- Chart Theo Đối Tác -->
           <div style="flex:1;min-width:280px;height:280px;position:relative;background:rgba(255,255,255,0.03);padding:15px;border-radius:12px;border:1px solid var(--border-glass);">
             <div style="font-size:13px;font-weight:600;color:#fff;margin-bottom:8px;border-left:3px solid #10b981;padding-left:8px;">Trạm Check-in theo Đối tác</div>
-            <div style="height:210px;position:relative;"><canvas id="checkin-partner-chart"></canvas></div>
+            <div style="height:210px;overflow-x:auto;overflow-y:hidden;">
+              <div style="min-width:400px;height:100%;position:relative;"><canvas id="checkin-partner-chart"></canvas></div>
+            </div>
           </div>
         </div>
       </div>
@@ -98,8 +102,10 @@
       <div class="dash-section" style="margin-top:15px;">
         <div style="background:rgba(255,255,255,0.03);padding:15px;border-radius:12px;border:1px solid var(--border-glass);">
           <div style="font-size:13px;font-weight:600;color:#fff;margin-bottom:8px;border-left:3px solid #f59e0b;padding-left:8px;">Chi tiết Checkin theo Tỉnh – Đối tác</div>
-          <div style="height:240px;position:relative;overflow-x:auto;">
-            <canvas id="checkin-combo-chart"></canvas>
+          <div style="height:240px;overflow-x:auto;overflow-y:hidden;">
+            <div style="min-width:600px;height:100%;position:relative;">
+              <canvas id="checkin-combo-chart"></canvas>
+            </div>
           </div>
         </div>
       </div>

@@ -759,37 +759,23 @@ export const App = {
           const checkinTimeStr = `${String(now.getDate()).padStart(2,'0')}/${String(now.getMonth()+1).padStart(2,'0')}/${now.getFullYear()} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
           this.sites[siteIndex]['Check-in'] = checkinTimeStr;
           if (result.updatedProgress) {
-            if (result.updatedProgress.p4) this.sites[siteIndex]['Tiến độ 4G'] = result.updatedProgress.p4;
             if (result.updatedProgress.p5) this.sites[siteIndex]['Tiến độ 5G'] = result.updatedProgress.p5;
-            
-            // Recalculate status locally
-            // So khớp không phân biệt hoa/thường & khoảng trắng thừa — khớp với cách
-            // chuẩn hoá phía Apps Script (checkinSite) để marker luôn đổi màu đúng
-            // ngay khi Check-in, kể cả khi cột "Phân loại" trên Sheet gõ lệch dấu cách.
-            const classification = String(this.sites[siteIndex]['Phân loại'] || '').trim();
-            const normClassification = classification.toUpperCase().replace(/\s+/g, '');
-            let p4g = String(this.sites[siteIndex]['Tiến độ 4G'] || '').trim();
+
+            // Recalculate status locally — đợt này chỉ triển khai 5G nên Status chỉ xét
+            // theo Tiến độ 5G. Check-in luôn set 5G = "Đang thực hiện" nếu chưa "Hoàn
+            // thành" (trừ khi trạm đã Hoàn thành, lúc đó không vào tới đây), nên Status
+            // sau Check-in cũng luôn phản ánh đúng ngay lập tức.
             let p5g = String(this.sites[siteIndex]['Tiến độ 5G'] || '').trim();
             let trangThai = 'Chưa hoàn thành';
-            if (normClassification === '5GZ') {
-              if (p5g === 'Hoàn thành') trangThai = 'Hoàn thành';
-              else if (p5g === 'Đang thực hiện') trangThai = 'Đang thực hiện';
-            } else if (normClassification === '4GZ') {
-              if (p4g === 'Hoàn thành') trangThai = 'Hoàn thành';
-              else if (p4g === 'Đang thực hiện') trangThai = 'Đang thực hiện';
-            } else {
-              // '5G_4G Z' hoặc phân loại không xác định — xét chung cả 2 tiến độ
-              if (p4g === 'Hoàn thành' && p5g === 'Hoàn thành') trangThai = 'Hoàn thành';
-              else if (p4g === 'Đang thực hiện' || p5g === 'Đang thực hiện' || p4g === 'Hoàn thành' || p5g === 'Hoàn thành') trangThai = 'Đang thực hiện';
-            }
+            if (p5g === 'Hoàn thành') trangThai = 'Hoàn thành';
+            else if (p5g === 'Đang thực hiện') trangThai = 'Đang thực hiện';
             this.sites[siteIndex]['Status'] = trangThai;
-            
+
             const nowStr = new Date().toLocaleString('vi-VN');
             this.sites[siteIndex]['Ngày cập nhật'] = nowStr;
             Storage.setSitesData(this.sites);
-            
+
             if (this.currentDetailSite && this.currentDetailSite['Site'] === siteStr) {
-              this.currentDetailSite['Tiến độ 4G'] = result.updatedProgress.p4 || this.currentDetailSite['Tiến độ 4G'];
               this.currentDetailSite['Tiến độ 5G'] = result.updatedProgress.p5 || this.currentDetailSite['Tiến độ 5G'];
               this.currentDetailSite['Status'] = trangThai;
               this.currentDetailSite['Ngày cập nhật'] = nowStr;
