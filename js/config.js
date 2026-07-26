@@ -6,11 +6,11 @@
  */
 export const AppConfig = {
   // ⚠️ DÁN URL GOOGLE APPS SCRIPT CỦA BẠN VÀO ĐÂY:
-  API_URL: import.meta.env.VITE_API_URL || 'https://script.google.com/macros/s/AKfycbyoi4t2WM7RKOxu0pdm9BoH0RRiAS53XX3hk2-t-XXR2VqKTVda0-Jiymjl2rTts8VhSQ/exec',
+  API_URL: import.meta.env?.VITE_API_URL || 'https://script.google.com/macros/s/AKfycbyoi4t2WM7RKOxu0pdm9BoH0RRiAS53XX3hk2-t-XXR2VqKTVda0-Jiymjl2rTts8VhSQ/exec',
 
   // ⚠️ Phải khớp CHÍNH XÁC với API_SECRET trong Code.gs — mọi request ghi dữ liệu (doPost)
   // đều gửi kèm giá trị này, Code.gs từ chối nếu không khớp.
-  API_SECRET: import.meta.env.VITE_API_SECRET || 'JCGfCl6mZrRxnl2GnSTxI4suh4XjnEJh',
+  API_SECRET: import.meta.env?.VITE_API_SECRET || 'JCGfCl6mZrRxnl2GnSTxI4suh4XjnEJh',
 
   // App info
   APP_NAME: 'RF Mate',
@@ -64,5 +64,5 @@ export const AppConfig = {
   // 1. Vào Google AI Studio lấy API Key thật (bắt đầu bằng AIza...)
   // 2. Mở trình duyệt web, ấn F12 sang tab Console. Gõ: btoa("AIza_KEY_CỦA_BẠN") rồi Enter.
   // 3. Copy chuỗi kết quả (ví dụ: QUl6...) và dán vào giữa hai dấu nháy đơn của hàm atob() bên dưới.
-  GEMINI_API_KEY: import.meta.env.VITE_GEMINI_API_KEY || atob('QVEuQWI4Uk42SWZnUFN3THR0YVJCTDEtNDFJdWRvaDlpOFdFRHpTeWViNUVRUFQ0RXZxbWc='),
+  GEMINI_API_KEY: import.meta.env?.VITE_GEMINI_API_KEY || atob('QVEuQWI4Uk42SWZnUFN3THR0YVJCTDEtNDFJdWRvaDlpOFdFRHpTeWViNUVRUFQ0RXZxbWc='),
 };
