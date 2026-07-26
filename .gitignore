@@ -1,0 +1,14 @@
+# Backend code — chứa API_SECRET, không public lên GitHub. Deploy thủ công vào Apps Script Editor.
+google-apps-script/
+
+# Secrets local (API URL/Key thật dùng khi `npm run dev`)
+.env
+
+# Dependencies
+node_modules/
+
+# Build output (regenerate bằng `npm run build` khi cần)
+dist/
+
+# OS/editor
+.DS_Store

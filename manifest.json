@@ -1,0 +1,27 @@
+{
+  "name": "RF Mate",
+  "short_name": "RF Mate",
+  "description": "Ứng dụng quản lý, hỗ trợ và cập nhật tiến độ triển khai mạng lưới",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0e1a",
+  "theme_color": "#0a0e1a",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["utilities", "productivity"],
+  "lang": "vi",
+  "scope": "."
+}
