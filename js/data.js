@@ -106,7 +106,7 @@ export const DataService = {
   // ============================================================
   async fetchSectors() {
     try {
-      const result = await this.apiCall({ action: 'getSectors', pro: Storage.getSession()?.pro, role: Storage.getSession()?.role });
+      const result = await this.apiCall({ action: 'getSectors', pro: Storage.getSession()?.pro, role: Storage.getSession()?.role, project: Projects.currentId, username: Storage.getSession()?.username });
       if (result.success) {
         return result.sectors || [];
       }
@@ -121,6 +121,7 @@ export const DataService = {
     try {
       const result = await this.apiCall(null, 'POST', {
         action: 'updateSector',
+        project: Projects.currentId,
         site: sectorData.site,
         cell: sectorData.cell,
         tech: sectorData.tech,

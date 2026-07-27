@@ -347,6 +347,9 @@ html, body {
   width: 42px;
   height: 42px;
   padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   border-radius: 50%;
   background: var(--bg-glass);
   border: 1px solid var(--border-glass);
@@ -367,6 +370,13 @@ html, body {
   background: var(--color-blue);
   border-color: var(--color-blue);
   box-shadow: var(--shadow-glow-blue);
+}
+
+/* Lớp bản đồ đang là vệ tinh — phân biệt với lớp mặc định, không cần đổi icon */
+.btn-icon.satellite {
+  background: var(--color-green);
+  border-color: var(--color-green);
+  box-shadow: 0 0 20px var(--color-green-glow);
 }
 
 .btn-full {
@@ -610,8 +620,8 @@ html, body {
 }
 
 .overview-user {
-  font-size: 20px;
-  font-weight: 800;
+  font-size: 16px;
+  font-weight: 700;
   color: var(--text-primary);
 }
 

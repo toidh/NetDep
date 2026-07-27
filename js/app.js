@@ -630,15 +630,7 @@ export const App = {
   handleLayerToggle() {
     const layer = MapManager.toggleLayer();
     const btn = document.getElementById('layer-btn');
-    const icon = btn.querySelector('.layer-icon');
-
-    if (layer === 'satellite') {
-      btn.classList.add('satellite');
-      if (icon) icon.textContent = '🗺️';
-    } else {
-      btn.classList.remove('satellite');
-      if (icon) icon.textContent = '🛰️';
-    }
+    btn.classList.toggle('satellite', layer === 'satellite');
   },
 
   // ============================================================
