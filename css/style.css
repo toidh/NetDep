@@ -454,9 +454,205 @@ html, body {
   pointer-events: auto;
 }
 
+/* === Chip dự án (top bar) === */
+/* Luôn hiển thị để người dùng biết đang thao tác trên dự án nào — tránh
+   cập nhật/check-in nhầm dự án. Không giấu trong menu. */
+#project-chip {
+  flex-shrink: 0;
+  max-width: 40vw;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 10px;
+  background: rgba(17, 24, 39, 0.85);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  font-family: 'Inter', sans-serif;
+  cursor: pointer;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  white-space: nowrap;
+}
+
+#project-chip:active {
+  background: rgba(30, 41, 59, 0.95);
+}
+
+#project-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#project-chip .chip-caret {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* Chỉ có 1 dự án thì chip không có tác dụng gì — ẩn để đỡ chật top bar */
+#project-chip.single {
+  display: none;
+}
+
+/* === Bottom sheet chọn dự án === */
+#project-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(0, 0, 0, 0.6);
+  display: none;
+  align-items: flex-end;
+}
+
+#project-sheet-overlay.visible {
+  display: flex;
+}
+
+#project-sheet {
+  width: 100%;
+  max-height: 75vh;
+  overflow-y: auto;
+  background: #0f172a;
+  border-top: 1px solid var(--border-glass);
+  border-radius: 18px 18px 0 0;
+  padding: 8px 16px calc(20px + env(safe-area-inset-bottom));
+  animation: sheet-up 0.22s ease-out;
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.project-sheet-handle {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0 10px;
+}
+
+.project-sheet-handle span {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.project-sheet-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+.project-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 13px 12px;
+  margin-bottom: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-item.active {
+  border-color: var(--color-blue);
+  background: rgba(59, 130, 246, 0.15);
+}
+
+.project-item-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.project-item-name {
+  flex: 1;
+  font-weight: 600;
+}
+
+.project-item-check {
+  color: var(--color-blue);
+  font-weight: 800;
+}
+
+/* === Màn hình Tổng quan dự án === */
+#overview-screen {
+  flex-direction: column;
+}
+
+.overview-container {
+  width: 100%;
+  max-width: 480px;
+  flex: 1;
+  margin: 0 auto;
+  overflow-y: auto;
+  padding: 0 16px 24px;
+}
+
+.overview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: calc(20px + env(safe-area-inset-top)) 16px 20px;
+}
+
+.overview-hello {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.overview-user {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.overview-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+
+.overview-card:active {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.overview-card-icon {
+  font-size: 26px;
+}
+
+.overview-card-name {
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
 /* === Search === */
 #search-container {
   flex: 1;
+  min-width: 0;
   position: relative;
 }
 

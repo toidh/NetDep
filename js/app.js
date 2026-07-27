@@ -2,6 +2,7 @@ import { AppConfig } from './config.js';
 import { Storage } from './storage.js';
 import { Auth } from './auth.js';
 import { DataService } from './data.js';
+import { Projects } from './projects.js';
 import { MapManager } from './map.js';
 import { DashboardManager } from './dashboard.js';
 import { ChartManager } from './chart.js';
@@ -30,13 +31,124 @@ export const App = {
     // API URL được cấu hình sẵn trong config.js, vào thẳng app
     // Check login status
     if (Auth.isLoggedIn()) {
-      await this.enterMainScreen();
+      // Phiên cũ khôi phục từ localStorage — nạp lại danh sách dự án được phép,
+      // phòng trường hợp quyền đã bị đổi trên sheet Users kể từ lần đăng nhập trước.
+      Projects.setList(Storage.getProjects());
+      DataService.fetchProjects().then(list => {
+        if (list.length) {
+          Projects.setList(list);
+          Storage.setProjects(list);
+          this.renderProjectChip();
+        }
+      });
+      await this.enterAfterAuth();
     } else {
       this.showScreen('login-screen');
     }
 
     // Setup event listeners
     this.setupEventListeners();
+  },
+
+  // ============================================================
+  // Điều hướng sau khi xác thực
+  // ============================================================
+  // Nhiều dự án → vào màn Tổng quan để chọn. Chỉ 1 dự án → vào thẳng bản đồ,
+  // không bắt người dùng bấm thừa một bước.
+  async enterAfterAuth() {
+    if (Projects.hasMultiple()) {
+      this.showOverviewScreen();
+    } else {
+      await this.enterMainScreen();
+    }
+  },
+
+  // ============================================================
+  // Chuyển dự án (chip + bottom sheet)
+  // ============================================================
+  renderProjectChip() {
+    const chip = document.getElementById('project-chip');
+    if (!chip) return;
+
+    const p = Projects.current();
+    document.getElementById('project-chip-icon').textContent = p.icon || '📁';
+    // Tên ngắn trên chip để ô tìm kiếm còn đủ rộng dùng được trên điện thoại
+    document.getElementById('project-chip-name').textContent = p.short || p.name || '';
+    // Chỉ 1 dự án thì chip vô nghĩa, ẩn đi để nhường chỗ cho ô tìm kiếm
+    chip.classList.toggle('single', !Projects.hasMultiple());
+  },
+
+  openProjectSheet() {
+    const list = document.getElementById('project-sheet-list');
+    if (!list) return;
+
+    list.innerHTML = Projects.list.map(p => {
+      const active = p.id === Projects.currentId;
+      return `<button type="button" class="project-item${active ? ' active' : ''}" onclick="App.switchProject('${p.id}')">
+        <span class="project-item-icon">${p.icon || '📁'}</span>
+        <span class="project-item-name">${p.name}</span>
+        ${active ? '<span class="project-item-check">✓</span>' : ''}
+      </button>`;
+    }).join('');
+
+    document.getElementById('project-sheet-overlay').classList.add('visible');
+  },
+
+  closeProjectSheet() {
+    const el = document.getElementById('project-sheet-overlay');
+    if (el) el.classList.remove('visible');
+  },
+
+  /** Đổi dự án: tải lại toàn bộ dữ liệu vì mỗi dự án là một sheet riêng. */
+  async switchProject(projectId) {
+    this.closeProjectSheet();
+    if (projectId === Projects.currentId) return;
+    if (!Projects.setCurrent(projectId)) return;
+
+    this.renderProjectChip();
+
+    // Dữ liệu của dự án cũ không còn đúng nữa — xoá trước khi tải cái mới để
+    // không có khoảnh khắc bản đồ hiện trạm của dự án cũ dưới tên dự án mới.
+    this.sites = [];
+    Storage.setSitesData([]);
+
+    this.showLoading('Đang tải dự án ' + Projects.current().name + '...');
+    try {
+      await this.loadProjectData();
+      this.showToast(Projects.current().icon + ' ' + Projects.current().name, 'success');
+    } catch (error) {
+      this.showToast('Không tải được dự án: ' + error.message, 'error');
+    }
+    this.hideLoading();
+  },
+
+  // ============================================================
+  // Màn hình Tổng quan dự án
+  // ============================================================
+  showOverviewScreen() {
+    // Chỉ 1 dự án thì màn này không có gì để chọn — bỏ qua
+    if (!Projects.hasMultiple()) return;
+
+    const nameEl = document.getElementById('overview-user-name');
+    if (nameEl) nameEl.textContent = Auth.getDisplayName();
+
+    const grid = document.getElementById('overview-grid');
+    if (grid) {
+      grid.innerHTML = Projects.list.map(p => `
+        <button type="button" class="overview-card" onclick="App.enterProject('${p.id}')">
+          <span class="overview-card-icon">${p.icon || '📁'}</span>
+          <span class="overview-card-name">${p.name}</span>
+        </button>
+      `).join('');
+    }
+
+    this.showScreen('overview-screen');
+  },
+
+  /** Bấm thẻ ở màn Tổng quan → vào bản đồ của dự án đó. */
+  async enterProject(projectId) {
+    Projects.setCurrent(projectId);
+    await this.enterMainScreen();
   },
 
   // ============================================================
@@ -181,6 +293,10 @@ export const App = {
     if (logoutBtn) {
       logoutBtn.addEventListener('click', () => this.handleLogout());
     }
+    const overviewLogoutBtn = document.getElementById('overview-logout-btn');
+    if (overviewLogoutBtn) {
+      overviewLogoutBtn.addEventListener('click', () => this.handleLogout());
+    }
 
     // === Modal Close ===
     const modalOverlay = document.getElementById('site-modal-overlay');
@@ -290,8 +406,12 @@ export const App = {
         if (!result.user || result.user.backendVersion !== 'v31') {
           alert('CẢNH BÁO: Ứng dụng đang gọi đến phiên bản Code.gs cũ! Bạn CẦN Deploy phiên bản Code mới nhất trên Apps Script VÀ đảm bảo bạn không tạo New Deployment mới khiến URL thay đổi.');
         }
+        // Danh sách dự án được phép do backend quyết định và gửi kèm ngay khi đăng nhập
+        Projects.setList(result.projects);
+        Storage.setProjects(result.projects || []);
+
         this.showToast(`Xin chào, ${Auth.getDisplayName()}!`, 'success');
-        await this.enterMainScreen();
+        await this.enterAfterAuth();
       } else {
         errorEl.textContent = result.message || 'Đăng nhập thất bại';
         errorEl.classList.add('visible');
@@ -316,6 +436,11 @@ export const App = {
     if (userNameEl) {
       userNameEl.textContent = Auth.getDisplayName();
     }
+    this.renderProjectChip();
+
+    // Mục "Tổng quan dự án" trong menu chỉ có nghĩa khi có nhiều hơn 1 dự án
+    const overviewBtn = document.getElementById('overview-btn');
+    if (overviewBtn) overviewBtn.style.display = Projects.hasMultiple() ? '' : 'none';
 
     // Initialize map
     if (!MapManager.map) {
@@ -325,35 +450,7 @@ export const App = {
     // Load data
     this.showLoading('Đang tải dữ liệu...');
     try {
-      if (!['view_limited', 'doitac'].includes(Auth.getRole())) {
-        this.sites = await DataService.fetchSites();
-        MapManager.loadSites(this.sites);
-        this.updateStats();
-        // Load sectors
-        DataService.fetchSectors().then(sectors => MapManager.loadSectors(sectors));
-      } else {
-        // Online-only view limited
-        this.sites = [];
-        this.siteDictionary = await DataService.fetchSiteDictionary();
-        const searchInput = document.getElementById('search-input');
-        if (searchInput) {
-          searchInput.placeholder = 'Nhập mã trạm để tìm kiếm...';
-        }
-      }
-
-      // Sync pending updates
-      const pending = Storage.getPendingUpdates();
-      if (pending.length > 0 && this.isOnline) {
-        const syncResult = await DataService.syncPendingUpdates();
-        if (syncResult.synced > 0) {
-          this.showToast(`Đã đồng bộ ${syncResult.synced} cập nhật offline`, 'success');
-          this.sites = await DataService.fetchSites();
-          if (!['view_limited', 'doitac'].includes(Auth.getRole())) {
-            MapManager.loadSites(this.sites);
-          }
-        }
-      }
-
+      await this.loadProjectData();
       this.hideLoading();
     } catch (error) {
       this.hideLoading();
@@ -366,6 +463,38 @@ export const App = {
 
     // Start GPS watch
     MapManager.startWatchingPosition();
+  },
+
+  // Tải dữ liệu của dự án đang chọn. Tách riêng để dùng lại khi đổi dự án
+  // (switchProject) thay vì chép lại toàn bộ luồng.
+  async loadProjectData() {
+    if (!['view_limited', 'doitac'].includes(Auth.getRole())) {
+      this.sites = await DataService.fetchSites();
+      MapManager.loadSites(this.sites);
+      this.updateStats();
+      DataService.fetchSectors().then(sectors => MapManager.loadSectors(sectors));
+    } else {
+      // Online-only view limited
+      this.sites = [];
+      this.siteDictionary = await DataService.fetchSiteDictionary();
+      const searchInput = document.getElementById('search-input');
+      if (searchInput) {
+        searchInput.placeholder = 'Nhập mã trạm để tìm kiếm...';
+      }
+    }
+
+    // Sync pending updates
+    const pending = Storage.getPendingUpdates();
+    if (pending.length > 0 && this.isOnline) {
+      const syncResult = await DataService.syncPendingUpdates();
+      if (syncResult.synced > 0) {
+        this.showToast(`Đã đồng bộ ${syncResult.synced} cập nhật offline`, 'success');
+        this.sites = await DataService.fetchSites();
+        if (!['view_limited', 'doitac'].includes(Auth.getRole())) {
+          MapManager.loadSites(this.sites);
+        }
+      }
+    }
   },
 
   // ============================================================
@@ -576,20 +705,9 @@ export const App = {
     const lastDate = site['Ngày cập nhật'] || '-';
     document.getElementById('modal-last-update').textContent = `${lastUser} - ${lastDate}`;
 
-    // Form values
-    const p4g = String(site['Tiến độ 4G'] || '').trim();
-    const p5g = String(site['Tiến độ 5G'] || '').trim();
-    const getProgVal = (v) => {
-      if (v === 'Hoàn thành') return 'Hoàn thành';
-      if (v === 'Đang thực hiện') return 'Đang thực hiện';
-      return 'Chưa hoàn thành';
-    };
-    document.getElementById('update-5g').value = getProgVal(p5g);
+    // Form values — nhãn/lựa chọn/các cột phụ đều theo dự án đang xem
+    this.renderProgressField(site);
     document.getElementById('update-note').value = '';
-
-    // 4G update field was removed, keep 5G always visible
-    const field5G = document.getElementById('field-5g');
-    if (field5G) field5G.style.display = '';
 
     // 5. Setup Action Buttons
     const lat = site['Lat'];
@@ -613,10 +731,11 @@ export const App = {
       setTimeout(() => historyEl.scrollTop = historyEl.scrollHeight, 10);
     }
 
-    // Check-in: mọi role đều được phép
+    // Check-in: mọi role đều được phép, nhưng dự án không cần ra hiện trường
+    // (ví dụ Kiểm tra CSDL) thì ẩn hẳn nút.
     const detailCheckinBtn = document.getElementById('detail-checkin-btn');
     if (detailCheckinBtn) {
-      detailCheckinBtn.style.display = 'flex';
+      detailCheckinBtn.style.display = Projects.checkinEnabled() ? 'flex' : 'none';
     }
 
     // Save site to context for checkin/compass
@@ -641,6 +760,47 @@ export const App = {
 
     // Show modal
     this.showOverlay('site-modal-overlay');
+  },
+
+  // ============================================================
+  // Khối "Cập nhật tiến độ" — render theo dự án đang xem
+  // ============================================================
+  // Nhãn, các lựa chọn trong dropdown và những cột phụ hiển thị đều lấy từ
+  // registry. Thêm dự án mới chỉ cần khai báo trong PROJECTS của Code.gs,
+  // không phải sửa hàm này.
+  renderProgressField(site) {
+    const project = Projects.current();
+    const field = Projects.progressField();
+    const options = Projects.progressOptions();
+
+    const label = document.getElementById('update-progress-label');
+    if (label) label.textContent = field;
+
+    const select = document.getElementById('update-progress');
+    if (select) {
+      const current = String(site[field] || '').trim();
+      select.innerHTML = options
+        .map(o => `<option value="${o}">${o}</option>`)
+        .join('');
+      // Giá trị lạ (hoặc trống) → về lựa chọn đầu tiên thay vì để select rỗng
+      select.value = options.indexOf(current) >= 0 ? current : options[0];
+    }
+
+    // Các cột phụ của dự án (chỉ đọc). Bỏ qua cột tiến độ vì đã có dropdown ở trên.
+    const extra = document.getElementById('project-extra-fields');
+    if (extra) {
+      const rows = (project.detailFields || [])
+        .filter(f => f !== field)
+        .map(f => {
+          const val = String(site[f] || '').trim() || '-';
+          return `<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0;">
+            <span style="color:var(--text-muted);">${f}</span>
+            <span style="font-weight:600;text-align:right;">${val}</span>
+          </div>`;
+        });
+      extra.innerHTML = rows.join('');
+      extra.style.display = rows.length ? '' : 'none';
+    }
   },
 
   setupCallButtons(site) {
@@ -758,25 +918,21 @@ export const App = {
           const now = new Date();
           const checkinTimeStr = `${String(now.getDate()).padStart(2,'0')}/${String(now.getMonth()+1).padStart(2,'0')}/${now.getFullYear()} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
           this.sites[siteIndex]['Check-in'] = checkinTimeStr;
-          if (result.updatedProgress) {
-            if (result.updatedProgress.p5) this.sites[siteIndex]['Tiến độ 5G'] = result.updatedProgress.p5;
-
-            // Recalculate status locally — đợt này chỉ triển khai 5G nên Status chỉ xét
-            // theo Tiến độ 5G. Check-in luôn set 5G = "Đang thực hiện" nếu chưa "Hoàn
-            // thành" (trừ khi trạm đã Hoàn thành, lúc đó không vào tới đây), nên Status
-            // sau Check-in cũng luôn phản ánh đúng ngay lập tức.
-            let p5g = String(this.sites[siteIndex]['Tiến độ 5G'] || '').trim();
-            let trangThai = 'Chưa hoàn thành';
-            if (p5g === 'Hoàn thành') trangThai = 'Hoàn thành';
-            else if (p5g === 'Đang thực hiện') trangThai = 'Đang thực hiện';
-            this.sites[siteIndex]['Status'] = trangThai;
-
+          // Dùng thẳng giá trị backend đã ghi vào Sheet, không tự tính lại. Trước đây
+          // client tự suy ra Status theo quy tắc riêng, lệch với backend nên marker
+          // đỏ lên rồi bị lần tải dữ liệu kế tiếp đè về màu cũ.
+          if (result.progressValue) {
+            const field = result.progressField || Projects.progressField();
+            const trangThai = result.status || DataService.computeStatus(result.progressValue);
             const nowStr = new Date().toLocaleString('vi-VN');
+
+            this.sites[siteIndex][field] = result.progressValue;
+            this.sites[siteIndex]['Status'] = trangThai;
             this.sites[siteIndex]['Ngày cập nhật'] = nowStr;
             Storage.setSitesData(this.sites);
 
             if (this.currentDetailSite && this.currentDetailSite['Site'] === siteStr) {
-              this.currentDetailSite['Tiến độ 5G'] = result.updatedProgress.p5 || this.currentDetailSite['Tiến độ 5G'];
+              this.currentDetailSite[field] = result.progressValue;
               this.currentDetailSite['Status'] = trangThai;
               this.currentDetailSite['Ngày cập nhật'] = nowStr;
               this.showSiteDetail(this.currentDetailSite);
@@ -796,7 +952,7 @@ export const App = {
             }
           }
           
-          if (result.updatedProgress || result.imageUrl) {
+          if (result.progressValue || result.imageUrl) {
             MapManager.loadSites(this.sites);
             this.updateStats();
             DashboardManager.renderDashboard(this.sites);
@@ -1075,8 +1231,8 @@ export const App = {
     if (!['admin', 'manager'].includes(Auth.getRole())) return App.showToast('Tài khoản của bạn không có quyền cập nhật tiến độ', 'error');
     const form = document.getElementById('update-form');
     const siteName = form.dataset.siteName;
-    const progress4G = this.currentDetailSite['Tiến độ 4G'] || '';
-    const progress5G = document.getElementById('update-5g').value;
+    const progressField = Projects.progressField();
+    const progressValue = document.getElementById('update-progress').value;
     const note = document.getElementById('update-note').value.trim();
 
     const submitBtn = document.getElementById('update-submit-btn');
@@ -1086,8 +1242,7 @@ export const App = {
     try {
       const result = await DataService.updateProgress({
         site: siteName,
-        progress4G: progress4G,
-        progress5G: progress5G,
+        progressValue: progressValue,
         note: note,
         username: Auth.getUsername(),
       });
@@ -1096,8 +1251,7 @@ export const App = {
         // Update local data
         const siteIndex = this.sites.findIndex((s) => s['Site'] === siteName);
         if (siteIndex >= 0) {
-          this.sites[siteIndex]['Tiến độ 4G'] = progress4G;
-          this.sites[siteIndex]['Tiến độ 5G'] = progress5G;
+          this.sites[siteIndex][progressField] = progressValue;
           if (result.updatedNote !== undefined) {
             this.sites[siteIndex]['Ghi chú (TKTU ONSITE)'] = result.updatedNote;
             if (this.currentDetailSite && this.currentDetailSite['Site'] === siteName) {
@@ -1127,28 +1281,8 @@ export const App = {
           const now = new Date();
           this.sites[siteIndex]['Ngày cập nhật'] = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth()+1).padStart(2, '0')}/${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
 
-          // Cập nhật luôn trạng thái cột "Trạng thái"
-          const classification = String(this.sites[siteIndex]['Phân loại'] || '').trim();
-          let p4g = String(this.sites[siteIndex]['Tiến độ 4G'] || '').trim();
-          let p5g = String(this.sites[siteIndex]['Tiến độ 5G'] || '').trim();
-          if (p4g === '') p4g = 'Chưa hoàn thành';
-          if (p5g === '') p5g = 'Chưa hoàn thành';
-
-          let trangThai = 'Chưa hoàn thành';
-          if (p5g === 'Hoàn thành') {
-            trangThai = 'Hoàn thành';
-          } else if (p5g === 'Đang thực hiện') {
-            trangThai = 'Đang thực hiện';
-          } else if (classification === '5G_4G Z') {
-            if (p4g === 'Hoàn thành' && p5g === 'Hoàn thành') trangThai = 'Hoàn thành';
-            else if (p4g === 'Đang thực hiện' || p5g === 'Đang thực hiện') trangThai = 'Đang thực hiện';
-          } else if (classification === '5G Z') {
-            if (p5g === 'Hoàn thành') trangThai = 'Hoàn thành';
-            else if (p5g === 'Đang thực hiện') trangThai = 'Đang thực hiện';
-          } else if (classification === '4G Z') {
-            if (p4g === 'Hoàn thành') trangThai = 'Hoàn thành';
-            else if (p4g === 'Đang thực hiện') trangThai = 'Đang thực hiện';
-          }
+          // Status ưu tiên giá trị backend trả về; offline thì tính bằng hàm dùng chung.
+          const trangThai = result.status || DataService.computeStatus(progressValue);
           this.sites[siteIndex]['Status'] = trangThai;
           this.sites[siteIndex]['status'] = trangThai;
           if (this.currentDetailSite && this.currentDetailSite['Site'] === siteName) {
@@ -1395,8 +1529,6 @@ export const App = {
     
     let filtered = [];
     if (filterId === 'total') filtered = this.sites;
-    else if (filterId === 'total_4g') filtered = this.sites.filter(s => DataService.getSiteStatus(s) === 'completed' && s['Tiến độ 4G'] == 100);
-    else if (filterId === 'total_5g') filtered = this.sites.filter(s => DataService.getSiteStatus(s) === 'completed' && s['Tiến độ 5G'] == 100);
     else if (filterId === 'completed') filtered = this.sites.filter(s => DataService.getSiteStatus(s) === 'completed');
     else if (filterId === 'in_progress') filtered = this.sites.filter(s => DataService.getSiteStatus(s) === 'in_progress');
     else if (filterId === 'pending') filtered = this.sites.filter(s => { const st = DataService.getSiteStatus(s); return st !== 'completed' && st !== 'in_progress'; });
@@ -1595,16 +1727,12 @@ export const App = {
       return;
     }
 
-    if (isCheckinMode) {
-      thead.innerHTML = '<tr><th>Mã trạm</th><th>Phân loại</th><th>4G</th><th>5G</th><th>Đối tác</th><th>Checkin</th></tr>';
-    } else {
-      thead.innerHTML = '<tr><th>Mã trạm</th><th>Phân loại</th><th>4G</th><th>5G</th><th>Đối tác</th><th>TKTU</th></tr>';
-    }
+    // Một cột tiến độ duy nhất, tên cột theo dự án đang xem
+    const progressField = Projects.progressField();
+    const lastCol = isCheckinMode ? 'Checkin' : 'TKTU';
+    thead.innerHTML = `<tr><th>Mã trạm</th><th>Phân loại</th><th>Tiến độ</th><th>Đối tác</th><th>${lastCol}</th></tr>`;
 
-
-    const formatProgress = (p, type, cat) => {
-      if (cat === '5G Z' && type === '4G') return '';
-      if (cat === '4G Z' && type === '5G') return '';
+    const formatProgress = (p) => {
       const str = String(p || '').trim();
       if (str === 'Hoàn thành') return '✅';
       if (str === 'Đang thực hiện') return '🔄';
@@ -1617,8 +1745,7 @@ export const App = {
       return `<tr>
         <td><span class="status-dot" style="background:${color}"></span><a href="#" class="clickable-site" style="color:${color}" onclick="App.openMapPopup('${s['Site']}'); return false;">${s['Site']}</a></td>
         <td>${s['Phân loại'] || '-'}</td>
-        <td class="num">${formatProgress(s['Tiến độ 4G'], '4G', s['Phân loại'])}</td>
-        <td class="num">${formatProgress(s['Tiến độ 5G'], '5G', s['Phân loại'])}</td>
+        <td class="num">${formatProgress(s[progressField])}</td>
         <td>${s['Đối tác'] || '-'}</td>
                 <td>${(() => {
           if (isCheckinMode) {
@@ -1665,10 +1792,6 @@ export const App = {
     Object.keys(site).forEach(key => {
       if (key === 'Site' || key === 'rowIdx') return;
       let val = site[key];
-      const cat = String(site['Phân loại'] || '').trim();
-      if (cat === '4G Z' && key === 'Tiến độ 5G') val = '';
-      if (cat === '5G Z' && key === 'Tiến độ 4G') val = '';
-
       if (val === undefined || val === null) val = '';
       if (key.includes('Ngày') || key.includes('Thời gian')) val = String(val);
       
@@ -1692,18 +1815,15 @@ export const App = {
     cleanSiteForExport(site, isCheckinMode = false, isDelayedMode = false, isDelayedDkMode = false) {
     
       const ordered = {};
-      
-      let p4g = site['Tiến độ 4G'] || '';
-      let p5g = site['Tiến độ 5G'] || '';
-      let cat = String(site['Phân loại'] || '').trim();
-      if (cat === '4G Z') p5g = '';
-      if (cat === '5G Z') p4g = '';
-      
+
+      // Cột tiến độ xuất ra Excel theo dự án đang xem
+      const progressField = Projects.progressField();
+      const progressValue = site[progressField] || '';
+
       if (isDelayedMode || isDelayedDkMode) {
         ordered['Trạm'] = site['Site'] || '';
         ordered['Phân loại'] = site['Phân loại'] || '';
-        ordered['4G'] = p4g;
-        ordered['5G'] = p5g;
+        ordered[progressField] = progressValue;
         ordered['Đối tác'] = site['Đối tác'] || '';
         ordered['TKTU'] = site['TKTU ONSITE'] || '';
         
@@ -1729,16 +1849,8 @@ export const App = {
     ordered['Phân loại'] = site['Phân loại'] || '';
     ordered['Huyện'] = site['Huyện'] || '';
     ordered['Phương án Swap'] = site['Phương án Swap'] || '';
-    
-    p4g = site['Tiến độ 4G'] || '';
-    p5g = site['Tiến độ 5G'] || '';
-    cat = String(site['Phân loại'] || '').trim();
-    if (cat === '4G Z') p5g = '';
-    if (cat === '5G Z') p4g = '';
-    
-    ordered['Tiến độ 4G'] = p4g;
-    ordered['Tiến độ 5G'] = p5g;
-    
+    ordered[progressField] = progressValue;
+
     // Ghi chú (TKTU ONSITE) only
     let ghiChu = '';
     for (const k in site) {
@@ -1866,10 +1978,7 @@ export const App = {
     const data = Object.keys(this.currentDetailSite)
       .filter(k => k !== 'rowIdx' && k !== 'Long' && k !== 'Lat' && k !== 'Ghi chú (TKTU ONSITE)' && k !== 'NOTE TKTU' && k !== 'SĐT TKTU ONSITE')
       .map(k => {
-        let val = this.currentDetailSite[k];
-        const cat = String(this.currentDetailSite['Phân loại'] || '').trim();
-        if (cat === '4G Z' && k === 'Tiến độ 5G') val = '';
-        if (cat === '5G Z' && k === 'Tiến độ 4G') val = '';
+        const val = this.currentDetailSite[k];
         return { "Trường thông tin": k, "Giá trị": val };
       });
 

@@ -1,5 +1,6 @@
 import { AppConfig } from './config.js';
 import { Storage } from './storage.js';
+import { Projects } from './projects.js';
 /**
  * BTS Progress Tracker - Data & API Module
  */
@@ -53,12 +54,36 @@ export const DataService = {
     return result;
   },
 
+  /**
+   * Lấy danh sách dự án user được phép vào. Backend là nơi quyết định (đọc cột
+   * "Phân quyền dự án" ở sheet Users), client không tự suy ra.
+   * Trả mảng rỗng nếu backend cũ chưa hỗ trợ — Projects.setList() sẽ tự fallback.
+   */
+  async fetchProjects() {
+    try {
+      const result = await this.apiCall({
+        action: 'getProjects',
+        username: Storage.getSession()?.username,
+      });
+      return (result && result.success && Array.isArray(result.projects)) ? result.projects : [];
+    } catch (error) {
+      console.warn('[DataService] fetchProjects failed:', error.message);
+      return [];
+    }
+  },
+
   // ============================================================
   // Fetch Sites
   // ============================================================
   async fetchSites() {
     try {
-      const result = await this.apiCall({ action: 'getSites', pro: Storage.getSession()?.pro, role: Storage.getSession()?.role });
+      const result = await this.apiCall({
+        action: 'getSites',
+        project: Projects.currentId,
+        username: Storage.getSession()?.username,
+        pro: Storage.getSession()?.pro,
+        role: Storage.getSession()?.role,
+      });
       if (result.success) {
         Storage.setSitesData(result.sites);
         Storage.setLastSync();
@@ -139,9 +164,9 @@ export const DataService = {
     try {
       const result = await this.apiCall(null, 'POST', {
         action: 'updateProgress',
+        project: Projects.currentId,
         site: siteData.site,
-        progress4G: siteData.progress4G,
-        progress5G: siteData.progress5G,
+        progressValue: siteData.progressValue,
         note: siteData.note,
         username: siteData.username,
       });
@@ -157,9 +182,11 @@ export const DataService = {
       return result;
     } catch (error) {
       console.warn('[DataService] Update failed, saving offline:', error.message);
-      // Save for offline sync
+      // Save for offline sync — kèm project để khi đồng bộ lại backend biết ghi vào
+      // sheet nào (user có thể đã đổi sang dự án khác trước khi có mạng trở lại).
       Storage.addPendingUpdate({
         ...siteData,
+        project: Projects.currentId,
         savedAt: new Date().toISOString(),
       });
 
@@ -198,110 +225,16 @@ export const DataService = {
   },
 
   // ============================================================
-  // Local Cache Management
+  // Status — NGUỒN DUY NHẤT phía client
   // ============================================================
-  updateLocalCache(siteData) {
-    const cached = Storage.getSitesData();
-    if (!cached || !cached.sites) return;
-
-    const sites = cached.sites;
-    const index = sites.findIndex(s => s['Site'] === siteData.site);
-    if (index >= 0) {
-      sites[index]['Tiến độ 4G'] = siteData.progress4G;
-      sites[index]['Tiến độ 5G'] = siteData.progress5G;
-      sites[index]['Ghi chú (TKTU ONSITE)'] = siteData.note || '';
-      sites[index]['User cập nhật'] = siteData.username || '';
-      sites[index]['Ngày cập nhật'] = new Date().toLocaleString('vi-VN');
-
-      // Calculate completion
-      // So khớp không phân biệt hoa/thường & khoảng trắng thừa (đồng bộ với app.js/Code.gs)
-      const classification = String(sites[index]['Phân loại'] || '').trim();
-      const normClassification = classification.toUpperCase().replace(/\s+/g, '');
-      let p4g = String(siteData.progress4G || '').trim();
-      let p5g = String(siteData.progress5G || '').trim();
-      if (p4g === '') p4g = 'Chưa thực hiện';
-      if (p5g === '') p5g = 'Chưa thực hiện';
-
-      let trangThai = 'Chưa thực hiện';
-      if (normClassification === '5GZ') {
-        if (p5g === 'Hoàn thành') trangThai = 'Hoàn thành';
-        else if (p5g === 'Đang thực hiện') trangThai = 'Đang thực hiện';
-      } else if (normClassification === '4GZ') {
-        if (p4g === 'Hoàn thành') trangThai = 'Hoàn thành';
-        else if (p4g === 'Đang thực hiện') trangThai = 'Đang thực hiện';
-      } else {
-        if (p4g === 'Hoàn thành' && p5g === 'Hoàn thành') trangThai = 'Hoàn thành';
-        else if (p4g === 'Đang thực hiện' || p5g === 'Đang thực hiện' || p4g === 'Hoàn thành' || p5g === 'Hoàn thành') trangThai = 'Đang thực hiện';
-      }
-
-      sites[index]['Status'] = trangThai;
-      Storage.saveSitesData(cached);
-    }
-  },
-
-  // ============================================================
-  // Update Progress
-  // ============================================================
-  async updateProgress(siteData) {
-    try {
-      const result = await this.apiCall(null, 'POST', {
-        action: 'updateProgress',
-        site: siteData.site,
-        progress4G: siteData.progress4G,
-        progress5G: siteData.progress5G,
-        note: siteData.note,
-        username: siteData.username,
-      });
-
-      if (result.success) {
-        // Remove from pending if exists
-        Storage.removePendingUpdate(siteData.site);
-
-        // Update local cache
-        this.updateLocalCache(siteData);
-      }
-
-      return result;
-    } catch (error) {
-      console.warn('[DataService] Update failed, saving offline:', error.message);
-      // Save for offline sync
-      Storage.addPendingUpdate({
-        ...siteData,
-        savedAt: new Date().toISOString(),
-      });
-
-      // Still update local cache
-      this.updateLocalCache(siteData);
-
-      return {
-        success: true,
-        offline: true,
-        message: 'Đã lưu offline. Sẽ đồng bộ khi có mạng.',
-      };
-    }
-  },
-
-  // ============================================================
-  // Sync Pending Updates
-  // ============================================================
-  async syncPendingUpdates() {
-    const pending = Storage.getPendingUpdates();
-    if (pending.length === 0) return { synced: 0 };
-
-    try {
-      const result = await this.apiCall(null, 'POST', {
-        action: 'batchUpdate',
-        updates: pending,
-      });
-
-      if (result.success) {
-        Storage.clearPendingUpdates();
-        return { synced: pending.length, ...result };
-      }
-      return { synced: 0, error: result.message };
-    } catch (error) {
-      return { synced: 0, error: error.message };
-    }
+  // Suy ra cột Status từ giá trị tiến độ của dự án đang xem. Phải khớp computeStatus()
+  // trong Code.gs. Trước đây quy tắc này bị chép ra 4 nơi (2 trong Code.gs, app.js,
+  // data.js) và đã lệch nhau, gây lỗi "marker đỏ rồi mất". Sửa quy tắc chỉ sửa ở đây.
+  computeStatus(progressValue) {
+    const v = String(progressValue || '').trim();
+    if (v === 'Hoàn thành') return 'Hoàn thành';
+    if (v === 'Đang thực hiện') return 'Đang thực hiện';
+    return 'Chưa thực hiện';
   },
 
   // ============================================================
@@ -313,37 +246,16 @@ export const DataService = {
 
     const sites = cached.sites;
     const index = sites.findIndex(s => s['Site'] === siteData.site);
-    if (index >= 0) {
-      sites[index]['Tiến độ 4G'] = siteData.progress4G;
-      sites[index]['Tiến độ 5G'] = siteData.progress5G;
-      sites[index]['Ghi chú (TKTU ONSITE)'] = siteData.note || '';
-      sites[index]['User cập nhật'] = siteData.username || '';
-      sites[index]['Ngày cập nhật'] = new Date().toLocaleString('vi-VN');
+    if (index < 0) return;
 
-      // Calculate completion
-      // So khớp không phân biệt hoa/thường & khoảng trắng thừa (đồng bộ với app.js/Code.gs)
-      const classification = String(sites[index]['Phân loại'] || '').trim();
-      const normClassification = classification.toUpperCase().replace(/\s+/g, '');
-      let p4g = String(siteData.progress4G || '').trim();
-      let p5g = String(siteData.progress5G || '').trim();
-      if (p4g === '') p4g = 'Chưa thực hiện';
-      if (p5g === '') p5g = 'Chưa thực hiện';
+    const field = Projects.progressField();
+    sites[index][field] = siteData.progressValue;
+    sites[index]['Ghi chú (TKTU ONSITE)'] = siteData.note || '';
+    sites[index]['User cập nhật'] = siteData.username || '';
+    sites[index]['Ngày cập nhật'] = new Date().toLocaleString('vi-VN');
+    sites[index]['Status'] = this.computeStatus(siteData.progressValue);
 
-      let trangThai = 'Chưa thực hiện';
-      if (normClassification === '5GZ') {
-        if (p5g === 'Hoàn thành') trangThai = 'Hoàn thành';
-        else if (p5g === 'Đang thực hiện') trangThai = 'Đang thực hiện';
-      } else if (normClassification === '4GZ') {
-        if (p4g === 'Hoàn thành') trangThai = 'Hoàn thành';
-        else if (p4g === 'Đang thực hiện') trangThai = 'Đang thực hiện';
-      } else {
-        if (p4g === 'Hoàn thành' && p5g === 'Hoàn thành') trangThai = 'Hoàn thành';
-        else if (p4g === 'Đang thực hiện' || p5g === 'Đang thực hiện' || p4g === 'Hoàn thành' || p5g === 'Hoàn thành') trangThai = 'Đang thực hiện';
-      }
-
-      sites[index]['Status'] = trangThai;
-      Storage.setSitesData(sites);
-    }
+    Storage.setSitesData(sites);
   },
 
   // ============================================================
@@ -491,7 +403,7 @@ export const DataService = {
   // ============================================================
   async checkinSite(data) {
     try {
-      const result = await this.apiCall(null, 'POST', { action: 'checkinSite', ...data });
+      const result = await this.apiCall(null, 'POST', { action: 'checkinSite', project: Projects.currentId, ...data });
       return result;
     } catch (error) {
       console.error('[DataService] checkinSite failed:', error);

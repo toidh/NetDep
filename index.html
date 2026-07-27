@@ -135,6 +135,33 @@
   </div>
 
   <!-- ============================================================
+       PROJECT SWITCHER (bottom sheet)
+       ============================================================ -->
+  <div id="project-sheet-overlay" onclick="App.closeProjectSheet()">
+    <div id="project-sheet" onclick="event.stopPropagation()">
+      <div class="project-sheet-handle"><span></span></div>
+      <div class="project-sheet-title">Chọn dự án</div>
+      <div id="project-sheet-list"></div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       OVERVIEW SCREEN (Tổng quan dự án)
+       ============================================================ -->
+  <div id="overview-screen" class="screen">
+    <div class="overview-header">
+      <div>
+        <div class="overview-hello">Xin chào 👋</div>
+        <div class="overview-user" id="overview-user-name">User</div>
+      </div>
+      <button class="btn-icon" id="overview-logout-btn" title="Đăng xuất">⏻</button>
+    </div>
+    <div class="overview-container">
+      <div class="overview-grid" id="overview-grid"></div>
+    </div>
+  </div>
+
+  <!-- ============================================================
        LOGIN SCREEN
        ============================================================ -->
   <div id="login-screen" class="screen">
@@ -170,8 +197,14 @@
        ============================================================ -->
   <div id="main-screen" class="screen">
 
-    <!-- Top Bar: Search + User Menu -->
+    <!-- Top Bar: Chip dự án + Search + User Menu -->
     <div class="top-bar">
+      <!-- Luôn hiển thị dự án đang xem: tránh cập nhật/check-in nhầm dự án -->
+      <button id="project-chip" type="button" onclick="App.openProjectSheet()">
+        <span id="project-chip-icon">📡</span>
+        <span id="project-chip-name">5G</span>
+        <span class="chip-caret">▾</span>
+      </button>
       <div id="search-container">
         <span class="search-icon">🔍</span>
         <input type="text" id="search-input" placeholder="Tìm kiếm trạm..." autocomplete="off">
@@ -199,6 +232,7 @@
               <div class="user-name" id="user-display-name">User</div>
               <div class="user-label">Đã đăng nhập</div>
             </div>
+            <button class="dropdown-item" id="overview-btn" onclick="App.showOverviewScreen()">🏠 Tổng quan dự án</button>
             <button class="dropdown-item danger" id="logout-btn">🚪 Đăng xuất</button>
           </div>
         </div>
@@ -431,15 +465,13 @@
 
           <form id="update-form">
             <div class="update-grid">
-              <!-- 4G removed as requested -->
-              <div class="form-group" id="field-5g">
-                <label class="form-label" for="update-5g">Tiến độ 5G</label>
-                <select id="update-5g" class="form-select">
-                  <option value="Chưa hoàn thành">Chưa hoàn thành</option>
-                  <option value="Đang thực hiện">Đang thực hiện</option>
-                  <option value="Hoàn thành">Hoàn thành</option>
-                </select>
+              <!-- Nhãn + lựa chọn được render động theo dự án đang xem (App.renderProgressField) -->
+              <div class="form-group" id="field-progress">
+                <label class="form-label" for="update-progress" id="update-progress-label">Tiến độ</label>
+                <select id="update-progress" class="form-select"></select>
               </div>
+              <!-- Các cột chỉ-đọc riêng của dự án (detailFields), render động -->
+              <div class="form-group full-width" id="project-extra-fields" style="display:none;"></div>
               <div class="form-group full-width">
                 <label class="form-label">Lịch sử Ghi chú</label>
                   <div id="update-note-history" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-glass);padding:8px;border-radius:8px;font-size:13px;max-height:100px;overflow-y:auto;white-space:pre-wrap;color:var(--text-muted);margin-bottom:8px;display:none;"></div>

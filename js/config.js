@@ -6,7 +6,7 @@
  */
 export const AppConfig = {
   // ⚠️ DÁN URL GOOGLE APPS SCRIPT CỦA BẠN VÀO ĐÂY:
-  API_URL: import.meta.env?.VITE_API_URL || 'https://script.google.com/macros/s/AKfycbyoi4t2WM7RKOxu0pdm9BoH0RRiAS53XX3hk2-t-XXR2VqKTVda0-Jiymjl2rTts8VhSQ/exec',
+  API_URL: import.meta.env?.VITE_API_URL || 'https://script.google.com/macros/s/AKfycbyjY-_-XAaJHAz7oNI3DPY-nq3XXo8IBjAzM7AxVnl_7jL4l2WD0yc1BPnQhnB3v5aL/exec',
 
   // ⚠️ Phải khớp CHÍNH XÁC với API_SECRET trong Code.gs — mọi request ghi dữ liệu (doPost)
   // đều gửi kèm giá trị này, Code.gs từ chối nếu không khớp.
@@ -58,6 +58,7 @@ export const AppConfig = {
     LAST_SYNC: 'bts_last_sync',
     MAP_STATE: 'bts_map_state',
     CHAT_HISTORY: 'bts_ai_chat',
+    PROJECTS: 'bts_projects',
   },
   // ==========================================
   // API Keys & Folder IDs

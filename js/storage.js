@@ -82,6 +82,17 @@ export const Storage = {
   },
 
   // ============================================================
+  // Danh sách dự án user được phép (backend trả về lúc đăng nhập)
+  // ============================================================
+  getProjects() {
+    return this.get(AppConfig.STORAGE_KEYS.PROJECTS) || [];
+  },
+
+  setProjects(list) {
+    this.set(AppConfig.STORAGE_KEYS.PROJECTS, list || []);
+  },
+
+  // ============================================================
   // Pending Updates (for offline sync)
   // ============================================================
   getPendingUpdates() {
