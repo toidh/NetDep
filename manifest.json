@@ -1,6 +1,6 @@
 {
-  "name": "RF Mate",
-  "short_name": "RF Mate",
+  "name": "NetDep",
+  "short_name": "NetDep",
   "description": "Ứng dụng quản lý, hỗ trợ và cập nhật tiến độ triển khai mạng lưới",
   "start_url": "./index.html",
   "display": "standalone",

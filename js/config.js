@@ -1,5 +1,5 @@
 /**
- * BTS Progress Tracker - Configuration
+ * NetDep - Configuration
  * 
  * HƯỚNG DẪN: Sau khi deploy Google Apps Script, dán URL vào API_URL bên dưới.
  * Chỉ cần thay đổi 1 lần duy nhất tại đây, tất cả user sẽ dùng chung.
@@ -13,7 +13,7 @@ export const AppConfig = {
   API_SECRET: import.meta.env?.VITE_API_SECRET || 'JCGfCl6mZrRxnl2GnSTxI4suh4XjnEJh',
 
   // App info
-  APP_NAME: 'RF Mate',
+  APP_NAME: 'NetDep',
   APP_VERSION: '1.0',
 
   // Map defaults (centered on Bạc Liêu province)

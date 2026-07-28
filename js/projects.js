@@ -1,5 +1,5 @@
 /**
- * RF Mate - Project Registry (client)
+ * NetDep - Project Registry (client)
  *
  * Danh sách dự án do BACKEND quyết định (Code.gs giữ registry gốc + phân quyền),
  * client chỉ lưu lại để render UI. Không khai báo dự án ở đây để tránh 2 nguồn sự thật.

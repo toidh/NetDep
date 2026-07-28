@@ -8,7 +8,7 @@ import { DashboardManager } from './dashboard.js';
 import { ChartManager } from './chart.js';
 
 /**
- * BTS Progress Tracker - Main Application Controller
+ * NetDep - Main Application Controller
  */
 export const App = {
   sites: [],

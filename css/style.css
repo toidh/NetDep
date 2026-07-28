@@ -549,10 +549,16 @@ html, body {
   background: rgba(255, 255, 255, 0.25);
 }
 
-.project-sheet-title {
-  font-size: 13px;
+/* Nhãn "Chọn dự án" xuất hiện ở 2 nơi (bottom sheet + màn Tổng quan) — dùng chung
+   một rule để hai nơi không trôi ra hai phong cách khác nhau theo thời gian.
+   Theo đúng pattern nhãn section sẵn có của app (.info-section-title): uppercase + giãn chữ. */
+.project-sheet-title,
+.overview-grid-label {
+  font-size: 11px;
   font-weight: 700;
   color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
   margin-bottom: 10px;
 }
 
@@ -600,11 +606,13 @@ html, body {
 
 .overview-container {
   width: 100%;
-  max-width: 480px;
+  max-width: 560px;
   flex: 1;
   margin: 0 auto;
   overflow-y: auto;
   padding: 0 16px 24px;
+  display: flex;
+  flex-direction: column;
 }
 
 .overview-header {
@@ -625,32 +633,86 @@ html, body {
   color: var(--text-primary);
 }
 
+/* Căn giữa theo chiều dọc khi ít thẻ (hết khoảng trống mênh mông phía dưới trên
+   desktop), nhưng vẫn cuộn bình thường khi nhiều thẻ hơn chiều cao màn hình. */
+.overview-grid-block {
+  margin: auto 0;
+}
+
+/* Style của .overview-grid-label khai báo chung với .project-sheet-title ở trên */
+
 .overview-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  /* auto-fit: số cột tự co giãn theo bề rộng thật và tự lấp đầy hàng — số dự án
+     mỗi tài khoản mỗi khác (2 hoặc 6), hard-code số cột sẽ để lại ô trống lệch. */
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px;
 }
 
 .overview-card {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 16px 14px;
-  background: rgba(255, 255, 255, 0.04);
+  gap: 12px;
+  padding: 18px 16px;
+  background: var(--bg-glass);
   border: 1px solid var(--border-glass);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-lg);
   color: var(--text-primary);
   font-family: 'Inter', sans-serif;
   text-align: left;
   cursor: pointer;
+  overflow: hidden;
+  transition: var(--transition);
+}
+
+/* Vạch màu mảnh trên đỉnh thẻ: đủ để phân biệt nhanh 6 dự án mà không tô màu
+   cả thẻ (sẽ chọi với nền tối). Màu lấy từ bảng màu sẵn có, xoay vòng 5 màu. */
+.overview-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  background: var(--card-accent, var(--color-blue));
+  opacity: 0.55;
+  transition: var(--transition);
+}
+
+.overview-card:nth-child(5n + 1) { --card-accent: var(--color-blue); }
+.overview-card:nth-child(5n + 2) { --card-accent: var(--color-green); }
+.overview-card:nth-child(5n + 3) { --card-accent: var(--color-amber); }
+.overview-card:nth-child(5n + 4) { --card-accent: var(--color-purple); }
+.overview-card:nth-child(5n + 5) { --card-accent: var(--color-orange); }
+
+/* Desktop trước đây không có phản hồi nào khi rê chuột — thẻ trông như chữ tĩnh
+   chứ không phải nút bấm được. */
+.overview-card:hover {
+  background: var(--bg-glass-hover);
+  border-color: var(--card-accent, var(--color-blue));
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-glass);
+}
+
+.overview-card:hover::before {
+  opacity: 1;
 }
 
 .overview-card:active {
+  transform: translateY(0);
   background: rgba(255, 255, 255, 0.08);
 }
 
 .overview-card-icon {
-  font-size: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  font-size: 24px;
+  line-height: 1;
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-glass);
 }
 
 .overview-card-name {

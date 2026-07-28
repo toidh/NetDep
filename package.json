@@ -1,5 +1,5 @@
 {
-  "name": "netrollout",
+  "name": "netdep",
   "version": "1.0.0",
   "description": "> **Ứng dụng PWA chuyên dụng** cho đội ngũ kỹ thuật viễn thông, hỗ trợ quản lý, theo dõi và cập nhật tiến độ triển khai trạm BTS **trực tiếp trên bản đồ số** — đồng bộ real-time với Google Sheets, hoạt động ngay cả khi **mất kết nối mạng (Offline Mode)**.",
   "main": "sw.js",

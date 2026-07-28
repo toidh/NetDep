@@ -1,6 +1,6 @@
 import { AppConfig } from './config.js';
 /**
- * BTS Progress Tracker - Local Storage Manager
+ * NetDep - Local Storage Manager
  */
 export const Storage = {
   get(key) {

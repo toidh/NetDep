@@ -2,7 +2,7 @@ import { AppConfig } from './config.js';
 import { Storage } from './storage.js';
 import { Projects } from './projects.js';
 /**
- * BTS Progress Tracker - Data & API Module
+ * NetDep - Data & API Module
  */
 export const DataService = {
   // ============================================================

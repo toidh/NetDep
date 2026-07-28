@@ -3,7 +3,7 @@ import { Storage } from './storage.js';
 import { Auth } from './auth.js';
 import { DataService } from './data.js';
 /**
- * BTS Progress Tracker - Map Module (Leaflet.js)
+ * NetDep - Map Module (Leaflet.js)
  */
 export const MapManager = {
   map: null,

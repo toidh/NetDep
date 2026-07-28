@@ -1,7 +1,7 @@
 import { Storage } from './storage.js';
 import { DataService } from './data.js';
 /**
- * BTS Progress Tracker - Authentication Module
+ * NetDep - Authentication Module
  */
 export const Auth = {
   async login(username, password) {

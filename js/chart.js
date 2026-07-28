@@ -1,7 +1,7 @@
 import { DataService } from './data.js';
 
 /**
- * BTS Progress Tracker - Chart Module
+ * NetDep - Chart Module
  * Handles all Chart.js rendering for the dashboard.
  */
 export const ChartManager = {
