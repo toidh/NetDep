@@ -109,8 +109,13 @@ export const App = {
 
     // Dữ liệu của dự án cũ không còn đúng nữa — xoá trước khi tải cái mới để
     // không có khoảnh khắc bản đồ hiện trạm của dự án cũ dưới tên dự án mới.
+    // Sector phải xoá cả dữ liệu lẫn hình đang vẽ: fetch sector chạy bất đồng bộ,
+    // nếu không xoá thì sector dự án cũ còn nằm trên bản đồ suốt lúc đang tải —
+    // nguy hiểm vì các dự án có thể trùng tên sector nhưng khác thông số.
     this.sites = [];
+    this.currentSiteSectors = [];
     Storage.setSitesData([]);
+    MapManager.clearSectors();
 
     this.showLoading('Đang tải dự án ' + Projects.current().name + '...');
     try {
@@ -147,7 +152,15 @@ export const App = {
 
   /** Bấm thẻ ở màn Tổng quan → vào bản đồ của dự án đó. */
   async enterProject(projectId) {
+    const changed = projectId !== Projects.currentId;
     Projects.setCurrent(projectId);
+    // Quay ra Tổng quan rồi vào dự án khác cũng là đổi dự án — sector cũ phải
+    // biến mất ngay như ở switchProject, không đợi fetch xong.
+    if (changed) {
+      this.sites = [];
+      this.currentSiteSectors = [];
+      MapManager.clearSectors();
+    }
     await this.enterMainScreen();
   },
 

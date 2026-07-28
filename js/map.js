@@ -590,6 +590,34 @@ export const MapManager = {
     this.renderSectors();
   },
 
+  /**
+   * Xoá sạch sector đang vẽ VÀ dữ liệu sector trong bộ nhớ.
+   * Dùng khi đổi dự án: sector của dự án cũ phải biến mất ngay, không đợi
+   * fetch dự án mới xong — các dự án có thể có sector trùng tên nhưng thông
+   * tin khác nhau, để sót lại là hiển thị sai dữ liệu dưới tên dự án mới.
+   */
+  clearSectors() {
+    this.sectorData = [];
+    if (this.sectorLayer) this.sectorLayer.clearLayers();
+    if (this.map) this.map.closePopup();
+  },
+
+  /**
+   * Gắn popup cho 1 sector, luôn mở tại `anchor` (giữa cánh sector) thay vì tại
+   * điểm ngón tay chạm. Leaflet mặc định mở popup của Path ngay chỗ click, nên
+   * chạm lệch vào rìa cánh quạt sẽ thấy popup "nhảy" ra xa khỏi sector.
+   */
+  bindSectorPopup(layers, popupHtml, anchor) {
+    const openAtAnchor = (e) => {
+      L.DomEvent.stopPropagation(e);
+      L.popup({ autoPan: false, maxWidth: 260 })
+        .setLatLng(anchor)
+        .setContent(popupHtml)
+        .openOn(this.map);
+    };
+    layers.forEach(layer => layer.on('click', openAtAnchor));
+  },
+
   renderSectors() {
     this.sectorLayer.clearLayers();
     if (!this.sectorsVisible || !this.sectorData.length) return;
@@ -709,21 +737,21 @@ export const MapManager = {
           </div>
         </div>
       `;
-      // autoPan:false — không cho Leaflet tự pan bản đồ khi mở popup (đây chính là
-      // nguyên nhân cảm giác "nhảy đi chỗ khác" khi chọn sector trên mobile).
-      shape.bindPopup(popupHtml, { autoPan: false, maxWidth: 260 });
       shape.addTo(this.sectorLayer);
 
       // Vùng chạm ẩn, kích thước cố định theo pixel (không co lại khi zoom out) đặt
       // giữa cánh sector — cánh sector là hình quạt mỏng nên rất khó bấm trúng trên
       // mobile; vùng tròn 16px này giúp bấm trúng đúng sector, không lệch sang trạm khác.
       const hitPoint = this.destinationPoint(lat, lng, azimuth, length * 0.65);
-      L.circleMarker(hitPoint, {
+      const hitCircle = L.circleMarker(hitPoint, {
         radius: 16,
         stroke: false,
         fillOpacity: 0,
         interactive: true,
-      }).bindPopup(popupHtml, { autoPan: false, maxWidth: 260 }).addTo(this.sectorLayer);
+      }).addTo(this.sectorLayer);
+
+      // Popup neo cố định giữa cánh sector, không chạy theo điểm chạm
+      this.bindSectorPopup([shape, hitCircle], popupHtml, hitPoint);
 
       count++;
     }
@@ -827,16 +855,17 @@ export const MapManager = {
           </div>
         </div>
       `;
-      shape.bindPopup(popupHtml, { autoPan: false, maxWidth: 260 });
       shape.addTo(this.sectorLayer);
 
       const hitPoint = this.destinationPoint(lat, lng, azimuth, length * 0.65);
-      L.circleMarker(hitPoint, {
+      const hitCircle = L.circleMarker(hitPoint, {
         radius: 16,
         stroke: false,
         fillOpacity: 0,
         interactive: true,
-      }).bindPopup(popupHtml, { autoPan: false, maxWidth: 260 }).addTo(this.sectorLayer);
+      }).addTo(this.sectorLayer);
+
+      this.bindSectorPopup([shape, hitCircle], popupHtml, hitPoint);
     });
   },
 
