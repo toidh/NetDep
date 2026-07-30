@@ -1,0 +1,50 @@
+Mẫu báo cáo riêng cho một dự án — đổi đuôi thành .js và đổi tên file để dùng.
+
+Ví dụ muốn dự án Newsite có báo cáo riêng:
+  1. Lưu file này thành  js/reports/newsite.js  (nội dung bên dưới)
+  2. Mở js/reports/index.js, bỏ chú thích dòng:  'newsite': () => import('./newsite.js'),
+  3. Mở Config.gs, thêm vào khối 'newsite':  reportModule: 'newsite',
+  4. Deploy lại Apps Script
+
+------------------------------------------------------------------ 8< ------
+
+import { DataService } from '../data.js';
+import { Projects } from '../projects.js';
+
+export default {
+  /**
+   * @param {Array} sites  Danh sách trạm đã lọc theo 2 dropdown ở Dashboard
+   * @param {Object} dash  DashboardManager — dùng lại được các hàm sẵn có,
+   *                       vd dash.renderPlanByGroup(), dash.groupValue()
+   * @returns {boolean}    true = đã tự render xong, Dashboard mặc định sẽ không chạy
+   */
+  renderDashboard(sites, dash) {
+    const field = Projects.progressField();
+
+    // Đếm số trạm ở từng mốc tiến độ
+    const counts = {};
+    Projects.progressOptions().forEach(o => { counts[o] = 0; });
+    sites.forEach(s => {
+      const v = String(s[field] || '').trim();
+      if (counts[v] !== undefined) counts[v]++;
+    });
+
+    document.getElementById('dash-summary').innerHTML = Projects.progressOptions()
+      .map(o => `
+        <div class="dash-card">
+          <div class="dash-card-value">${counts[o]}</div>
+          <div class="dash-card-label">${o}</div>
+        </div>`)
+      .join('');
+
+    const done = sites.filter(s => DataService.getSiteStatus(s) === 'completed').length;
+    const pct = sites.length ? ((done / sites.length) * 100).toFixed(2) : '0.00';
+    document.getElementById('dash-progress-fill').style.width = pct + '%';
+    document.getElementById('dash-progress-pct').textContent = pct + '%';
+
+    // Muốn dùng lại biểu đồ/bảng mặc định thì gọi tiếp các hàm của dash ở đây,
+    // hoặc tự vẽ Chart.js vào các canvas có sẵn trong index.html.
+
+    return true;
+  },
+};

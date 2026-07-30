@@ -84,44 +84,94 @@ class CheckinReport {
            d.getFullYear() === today.getFullYear();
   }
 
+  // ------------------------------------------------------------
+  // Cột nhóm theo dự án đang xem — đồng bộ với Dashboard.
+  // Registry (window.Projects) quyết định; fallback bộ cột 5G nếu chưa có.
+  // ------------------------------------------------------------
+  groupFields() {
+    const P = window.Projects;
+    const sites = (window.App && window.App.sites) || [];
+    if (P && typeof P.groupFields === 'function') {
+      const gf = P.groupFields(sites);
+      return [gf[0] || '', gf[1] || ''];
+    }
+    return ['Tỉnh mới', 'Đối tác'];
+  }
+
+  /** Giá trị 1 cột nhóm, có dự phòng 'Tỉnh mới' -> 'Tỉnh' như dữ liệu cũ. */
+  gval(site, field, dflt = '') {
+    if (!field) return dflt;
+    let v = site[field];
+    if ((v === undefined || v === '') && field === 'Tỉnh mới') v = site['Tỉnh'];
+    return String(v || dflt).trim() || dflt;
+  }
+
+  /** Đổi nhãn bộ lọc / tiêu đề biểu đồ / tiêu đề bảng theo cột nhóm của dự án. */
+  updateLabels(fA, fB) {
+    const setText = (sel, text) => {
+      const el = document.querySelector(sel);
+      if (el) el.textContent = text;
+    };
+    setText('label[for="checkin-filter-tinh"]', (fA || 'Tỉnh') + ':');
+    setText('label[for="checkin-filter-doitac"]', (fB || 'Đối tác') + ':');
+    setText('#checkin-chart-title-a', 'Trạm Check-in theo ' + (fA || 'Tỉnh'));
+    setText('#checkin-chart-title-b', 'Trạm Check-in theo ' + (fB || 'Đối tác'));
+    setText('#checkin-chart-title-combo', `Chi tiết Checkin theo ${fA || 'Tỉnh'} – ${fB || 'Đối tác'}`);
+    setText('#checkin-th-a', fA || 'Tỉnh');
+    setText('#checkin-th-b', fB || 'Đối tác');
+
+    // Dự án không có cột tương ứng -> ẩn cả cặp nhãn + dropdown
+    const toggle = (el, show) => {
+      const wrap = el && (el.closest('.dash-filter-item') || el);
+      if (wrap) wrap.style.display = show ? '' : 'none';
+    };
+    toggle(this.filterTinhEl, !!fA);
+    toggle(this.filterDoiTacEl, !!fB);
+  }
+
   populateFilterOptions(targetSites) {
-    const tinhSet = new Set();
-    const doiTacSet = new Set();
+    const setA = new Set();
+    const setB = new Set();
     targetSites.forEach(site => {
-      const prov = String(site['Tỉnh mới'] || site['Tỉnh'] || '').trim();
-      const partner = String(site['Đối tác'] || '').trim();
-      if (prov) tinhSet.add(prov);
-      if (partner) doiTacSet.add(partner);
+      const a = this.gval(site, this.fieldA);
+      const b = this.gval(site, this.fieldB);
+      if (a) setA.add(a);
+      if (b) setB.add(b);
     });
 
     const fillSelect = (selectEl, values, currentVal) => {
       if (!selectEl) return;
-      const sorted = Array.from(values).sort((a, b) => a.localeCompare(b));
+      const sorted = Array.from(values).sort((a, b) => a.localeCompare(b, 'vi'));
       selectEl.innerHTML = '<option value="">Tất cả</option>' +
         sorted.map(v => `<option value="${v}"${v === currentVal ? ' selected' : ''}>${v}</option>`).join('');
     };
 
-    fillSelect(this.filterTinhEl, tinhSet, this.filterTinh);
-    fillSelect(this.filterDoiTacEl, doiTacSet, this.filterDoiTac);
+    fillSelect(this.filterTinhEl, setA, this.filterTinh);
+    fillSelect(this.filterDoiTacEl, setB, this.filterDoiTac);
   }
 
   generateReport() {
     const sites = window.App && window.App.sites ? window.App.sites : [];
 
-    const targetSites = sites.filter(s => {
-      const danhSach = String(s['Danh sách'] || '').trim().toLowerCase();
-      return danhSach === 'triển khai';
-    });
+    // Cột nhóm + phạm vi thống kê theo registry của dự án (giống Dashboard).
+    // 5G khai scope 'Danh sách'='Triển khai' nên hành vi cũ giữ nguyên.
+    const [fA, fB] = this.groupFields();
+    this.fieldA = fA;
+    this.fieldB = fB;
+    this.updateLabels(fA, fB);
+
+    const P = window.Projects;
+    const targetSites = (P && typeof P.scopeSites === 'function')
+      ? P.scopeSites(sites)
+      : sites.filter(s => String(s['Danh sách'] || '').trim().toLowerCase() === 'triển khai');
 
     this.populateFilterOptions(targetSites);
 
     const filterTinh = this.filterTinh;
     const filterDoiTac = this.filterDoiTac;
     const filteredSites = targetSites.filter(site => {
-      const prov = String(site['Tỉnh mới'] || site['Tỉnh'] || '').trim();
-      const partner = String(site['Đối tác'] || '').trim();
-      if (filterTinh && prov !== filterTinh) return false;
-      if (filterDoiTac && partner !== filterDoiTac) return false;
+      if (filterTinh && this.gval(site, fA) !== filterTinh) return false;
+      if (filterDoiTac && this.gval(site, fB) !== filterDoiTac) return false;
       return true;
     });
 
@@ -132,8 +182,8 @@ class CheckinReport {
     const checkedInList = [];
 
     filteredSites.forEach(site => {
-      const prov = String(site['Tỉnh mới'] || site['Tỉnh'] || 'Khác').trim() || 'Khác';
-      const partner = String(site['Đối tác'] || 'Khác').trim() || 'Khác';
+      const prov = this.gval(site, fA, 'Khác');
+      const partner = this.gval(site, fB, 'Khác');
 
       if (this.isCheckinToday(site)) {
         totalCheckins++;

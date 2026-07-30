@@ -106,6 +106,8 @@ export const App = {
     if (!Projects.setCurrent(projectId)) return;
 
     this.renderProjectChip();
+    // Chu kỳ auto-refresh theo dự án — đặt lại ngay theo dự án mới
+    this.startAutoRefresh();
 
     // Dữ liệu của dự án cũ không còn đúng nữa — xoá trước khi tải cái mới để
     // không có khoảnh khắc bản đồ hiện trạm của dự án cũ dưới tên dự án mới.
@@ -538,6 +540,21 @@ export const App = {
     }
   },
 
+  /**
+   * Nhận diện chuỗi toạ độ người dùng gõ vào ô tìm kiếm.
+   * Chấp nhận "9.47669 104.89727" và "9.47669, 104.89727".
+   * Trả null nếu không phải toạ độ hợp lệ trên đất liền Việt Nam-ish (lat trước, lng sau).
+   */
+  parseCoordinates(text) {
+    const m = String(text || '').trim().match(/^(-?\d{1,3}(?:\.\d+)?)\s*[,\s]\s*(-?\d{1,3}(?:\.\d+)?)$/);
+    if (!m) return null;
+    const lat = parseFloat(m[1]);
+    const lng = parseFloat(m[2]);
+    if (isNaN(lat) || isNaN(lng)) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    return { lat, lng };
+  },
+
   handleSearch(query) {
     const resultsEl = document.getElementById('search-results');
     if (!query || query.length < 1) {
@@ -546,8 +563,26 @@ export const App = {
       return;
     }
 
+    // Dự án bật coordSearch (vd Kiểm tra trạm đối thủ) cho phép gõ thẳng toạ độ —
+    // trạm đối thủ thường chưa có mã trong hệ thống, chỉ biết vị trí.
+    if (Projects.coordSearchEnabled()) {
+      const coord = this.parseCoordinates(query);
+      if (coord) {
+        resultsEl.innerHTML = `
+          <div class="search-result-item" onclick="App.gotoCoordinates(${coord.lat}, ${coord.lng})">
+            <div class="search-result-dot" style="background:var(--color-amber)"></div>
+            <div class="search-result-info">
+              <div class="search-result-name">📍 ${coord.lat}, ${coord.lng}</div>
+              <div class="search-result-detail">Nhấn để tới vị trí này và dẫn đường</div>
+            </div>
+          </div>`;
+        resultsEl.classList.add('visible');
+        return;
+      }
+    }
+
     const q = query.toLowerCase();
-    
+
     // View Limited Role uses Site Dictionary for fast autocomplete
     if (['view_limited', 'doitac'].includes(Auth.getRole())) {
       const dict = this.siteDictionary || [];
@@ -615,6 +650,18 @@ export const App = {
     } else {
       MapManager.flyToSite(siteName);
     }
+  },
+
+  /** Bay tới một toạ độ gõ tay, đánh dấu và cho dẫn đường tới đó. */
+  gotoCoordinates(lat, lng) {
+    document.getElementById('search-results').classList.remove('visible');
+    MapManager.showCoordinateMarker(lat, lng);
+    this.showToast(`📍 ${lat}, ${lng}`, 'success');
+  },
+
+  /** Mở Google Maps chỉ đường tới toạ độ (dùng cho điểm gõ tay, không phải trạm). */
+  navigateToCoordinates(lat, lng) {
+    window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`, '_blank');
   },
 
   // ============================================================
@@ -1034,6 +1081,7 @@ export const App = {
 
       DataService.apiCall(null, 'POST', {
         action: 'updateNote',
+        project: Projects.currentId,
         site: siteName,
         note: newVal,
         username: Auth.getUsername()
@@ -1399,6 +1447,9 @@ export const App = {
   // ============================================================
   startAutoRefresh() {
     if (this.refreshInterval) clearInterval(this.refreshInterval);
+    // Chu kỳ theo dự án đang xem (registry `refreshMinutes` — doithu ~2.600 trạm
+    // dùng 2h), không khai thì 5 phút mặc định. Đổi dự án phải gọi lại hàm này.
+    const interval = Projects.refreshIntervalMs() || AppConfig.DATA_REFRESH_INTERVAL;
     this.refreshInterval = setInterval(async () => {
       if (this.isOnline) {
         try {
@@ -1410,7 +1461,7 @@ export const App = {
           }
         } catch (e) {}
       }
-    }, AppConfig.DATA_REFRESH_INTERVAL);
+    }, interval);
   },
 
   // ============================================================
@@ -1533,7 +1584,13 @@ export const App = {
     this.currentListTitle = title;
     
     let filtered = [];
-    if (filterId === 'total') filtered = this.sites;
+    // Thẻ đếm theo đúng một giá trị của cột tiến độ (vd Newsite: 'Chưa thuê', 'Phát sóng')
+    if (String(filterId).startsWith('progress:')) {
+      const want = decodeURIComponent(String(filterId).slice('progress:'.length)).trim().toLowerCase();
+      const field = Projects.progressField();
+      filtered = this.sites.filter(s => String(s[field] || '').trim().toLowerCase() === want);
+    }
+    else if (filterId === 'total') filtered = this.sites;
     else if (filterId === 'completed') filtered = this.sites.filter(s => DataService.getSiteStatus(s) === 'completed');
     else if (filterId === 'in_progress') filtered = this.sites.filter(s => DataService.getSiteStatus(s) === 'in_progress');
     else if (filterId === 'pending') filtered = this.sites.filter(s => { const st = DataService.getSiteStatus(s); return st !== 'completed' && st !== 'in_progress'; });

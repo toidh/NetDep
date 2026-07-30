@@ -1,5 +1,7 @@
 import { DataService } from './data.js';
 import { ChartManager } from './chart.js';
+import { Projects } from './projects.js';
+import { CustomReports } from './reports/index.js';
 
 /**
  * NetDep - Dashboard Module
@@ -10,30 +12,57 @@ export const DashboardManager = {
   filterTinh: '',
   filterDoiTac: '',
 
+  // 2 cột đang dùng cho 2 dropdown lọc của dự án hiện tại (do registry quyết định)
+  groupFieldA: '',
+  groupFieldB: '',
+
+  /** Giá trị của 1 cột nhóm, có dự phòng 'Tỉnh mới' -> 'Tỉnh' như dữ liệu cũ. */
+  groupValue(site, field) {
+    if (!field) return '';
+    let v = site[field];
+    if ((v === undefined || v === '') && field === 'Tỉnh mới') v = site['Tỉnh'];
+    return String(v || '').trim();
+  },
+
   populateDashboardFilters(sites) {
-    const tinhSet = new Set();
-    const doiTacSet = new Set();
+    const setA = new Set();
+    const setB = new Set();
     sites.forEach(s => {
-      const t = String(s['Tỉnh mới'] || s['Tỉnh'] || '').trim();
-      const d = String(s['Đối tác'] || '').trim();
-      if (t) tinhSet.add(t);
-      if (d) doiTacSet.add(d);
+      const a = this.groupValue(s, this.groupFieldA);
+      const b = this.groupValue(s, this.groupFieldB);
+      if (a) setA.add(a);
+      if (b) setB.add(b);
     });
 
-    const fillSelect = (id, values, currentVal) => {
+    const fillSelect = (id, values, currentVal, label) => {
       const el = document.getElementById(id);
       if (!el) return;
-      const sorted = Array.from(values).sort((a, b) => a.localeCompare(b));
+      // Dự án không có cột này thì ẩn hẳn dropdown thay vì để một ô rỗng vô nghĩa
+      const wrap = el.closest('.dash-filter-item') || el;
+      if (!label) {
+        wrap.style.display = 'none';
+        return;
+      }
+      wrap.style.display = '';
+      const lbl = document.querySelector(`label[for="${id}"]`);
+      if (lbl) lbl.textContent = label + ':';
+      const sorted = Array.from(values).sort((a, b) => a.localeCompare(b, 'vi'));
       el.innerHTML = '<option value="">Tất cả</option>' +
         sorted.map(v => `<option value="${v}"${v === currentVal ? ' selected' : ''}>${v}</option>`).join('');
     };
 
-    fillSelect('dash-filter-tinh', tinhSet, this.filterTinh);
-    fillSelect('dash-filter-doitac', doiTacSet, this.filterDoiTac);
+    fillSelect('dash-filter-tinh', setA, this.filterTinh, this.groupFieldA);
+    fillSelect('dash-filter-doitac', setB, this.filterDoiTac, this.groupFieldB);
   },
 
   renderDashboard(rawSites) {
     if (!rawSites || !Array.isArray(rawSites)) { rawSites = []; }
+
+    // Cột nào dùng để lọc/nhóm là do registry của dự án quyết định, và chỉ giữ
+    // những cột thực sự có trong dữ liệu (xem Projects.groupFields).
+    const fields = Projects.groupFields(rawSites);
+    this.groupFieldA = fields[0] || '';
+    this.groupFieldB = fields[1] || '';
 
     // Capture the current selection BEFORE rebuilding the <select> options,
     // otherwise populateDashboardFilters() would overwrite it with the stale value.
@@ -46,34 +75,48 @@ export const DashboardManager = {
 
     const sites = (this.filterTinh || this.filterDoiTac)
       ? rawSites.filter(s => {
-          const t = String(s['Tỉnh mới'] || s['Tỉnh'] || '').trim();
-          const d = String(s['Đối tác'] || '').trim();
-          if (this.filterTinh && t !== this.filterTinh) return false;
-          if (this.filterDoiTac && d !== this.filterDoiTac) return false;
+          if (this.filterTinh && this.groupValue(s, this.groupFieldA) !== this.filterTinh) return false;
+          if (this.filterDoiTac && this.groupValue(s, this.groupFieldB) !== this.filterDoiTac) return false;
           return true;
         })
       : rawSites;
 
-    // Only count 'Triển khai' for flashcards
-    const trienKhaiSites = sites.filter(s => String(s['Danh sách'] || '').trim().toLowerCase() === 'triển khai');
-    const total = trienKhaiSites.length;
-    const completed = trienKhaiSites.filter(s => DataService.getSiteStatus(s) === 'completed').length;
+    // Dự án cần báo cáo khác hẳn thì tự render, phần dưới không chạy nữa
+    if (CustomReports.renderDashboard(Projects.reportModule(), sites, this)) return;
+
+    // Phạm vi thống kê do registry quyết định (5G: chỉ 'Triển khai'; dự án khác:
+    // toàn bộ). Cột lọc không tồn tại thì lấy tất cả, không cho ra 0 trạm.
+    const scoped = Projects.scopeSites(sites);
+    const total = scoped.length;
+    const completed = scoped.filter(s => DataService.getSiteStatus(s) === 'completed').length;
     const notUpdated = total - completed;
     const pct = total > 0 ? ((completed / total) * 100).toFixed(2) : '0.00';
 
     // === Summary Cards ===
-    document.getElementById('dash-summary').innerHTML = `
+    let cardsHtml = `
       <div class="dash-card card-total clickable-card" onclick="App.showSiteList('total', 'Tổng trạm')"><div class="dash-card-value">${total}</div><div class="dash-card-label">Tổng trạm</div></div>
       <div class="dash-card card-completed clickable-card" onclick="App.showSiteList('completed', 'Hoàn thành')"><div class="dash-card-value">${completed}</div><div class="dash-card-label">Hoàn thành</div></div>
       <div class="dash-card card-pending clickable-card" onclick="App.showSiteList('pending', 'Chưa hoàn thành')"><div class="dash-card-value">${notUpdated}</div><div class="dash-card-label">Chưa hoàn thành</div></div>
     `;
+
+    // Thẻ đếm theo từng mốc tiến độ riêng của dự án (vd Newsite: Chưa thuê / Phát sóng)
+    const field = Projects.progressField();
+    Projects.valueCards().forEach(card => {
+      const want = String(card.value || '').trim().toLowerCase();
+      const n = scoped.filter(s => String(s[field] || '').trim().toLowerCase() === want).length;
+      cardsHtml += `
+      <div class="dash-card clickable-card" onclick="App.showSiteList('progress:${encodeURIComponent(card.value)}', '${card.label}')"><div class="dash-card-value">${n}</div><div class="dash-card-label">${card.label}</div></div>`;
+    });
+    document.getElementById('dash-summary').innerHTML = cardsHtml;
 
     // === Progress Bar ===
     document.getElementById('dash-progress-fill').style.width = pct + '%';
     document.getElementById('dash-progress-pct').textContent = pct + '%';
 
     // === Cumulative Report ===
-    this.renderPlanByGroup(trienKhaiSites, "Tỉnh mới", "dash-cumulative-content");
+    if (this.groupFieldA) {
+      this.renderPlanByGroup(scoped, this.groupFieldA, "dash-cumulative-content");
+    }
 
     this.renderSummaryDelayed(sites);
 
@@ -87,14 +130,23 @@ export const DashboardManager = {
   renderSummaryDelayed(sites) {
     const el = document.getElementById('dash-summary-delayed');
     if (!el) return;
-    
+
+    // Khối này đếm trạm chậm tiến độ dựa trên 2 cột ngày. Dự án không có cột ngày
+    // thì bảng luôn rỗng — ẩn hẳn thay vì để một khung trống gây tưởng là lỗi.
+    const hasDates = Projects.hasField(sites, 'Ngày đăng ký') || Projects.hasField(sites, 'Ngày cập nhật');
+    if (!hasDates) { el.innerHTML = ''; el.style.display = 'none'; return; }
+    el.style.display = '';
+
+    // Nhóm theo cột thứ 2 của dự án (5G là 'Đối tác')
+    const groupField = this.groupFieldB || this.groupFieldA || 'Đối tác';
+
     const todayDate = new Date();
     todayDate.setHours(0,0,0,0);
-    
+
     const partners = {};
-    
+
     sites.forEach(s => {
-      const p = String(s['Đối tác'] || 'Khác').trim();
+      const p = this.groupValue(s, groupField) || 'Khác';
       if (!partners[p]) partners[p] = { dk: 0, exe: 0 };
       
       if (DataService.getSiteStatus(s) !== 'completed') {

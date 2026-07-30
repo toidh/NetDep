@@ -68,15 +68,21 @@
 
       <!-- Filters: chung cho các biểu đồ -->
       <div class="dash-section" style="margin-top:15px;">
+        <!-- Nhãn 2 bộ lọc đổi theo cột nhóm của dự án đang xem (CheckinReport tự đặt
+             lại text và ẩn cả cặp nếu dự án không có cột tương ứng) -->
         <div class="dash-filter-row">
-          <label style="font-size:12px;color:#94a3b8;">Tỉnh:</label>
-          <select id="checkin-filter-tinh" class="map-filter-select">
-            <option value="">Tất cả</option>
-          </select>
-          <label style="font-size:12px;color:#94a3b8;">Đối tác:</label>
-          <select id="checkin-filter-doitac" class="map-filter-select">
-            <option value="">Tất cả</option>
-          </select>
+          <span class="dash-filter-item">
+            <label for="checkin-filter-tinh" style="font-size:12px;color:#94a3b8;">Tỉnh:</label>
+            <select id="checkin-filter-tinh" class="map-filter-select">
+              <option value="">Tất cả</option>
+            </select>
+          </span>
+          <span class="dash-filter-item">
+            <label for="checkin-filter-doitac" style="font-size:12px;color:#94a3b8;">Đối tác:</label>
+            <select id="checkin-filter-doitac" class="map-filter-select">
+              <option value="">Tất cả</option>
+            </select>
+          </span>
         </div>
       </div>
 
@@ -85,14 +91,14 @@
         <div style="display:flex;gap:15px;flex-wrap:wrap;">
           <!-- Chart Theo Tỉnh -->
           <div style="flex:1;min-width:280px;height:280px;position:relative;background:rgba(255,255,255,0.03);padding:15px;border-radius:12px;border:1px solid var(--border-glass);">
-            <div style="font-size:13px;font-weight:600;color:#fff;margin-bottom:8px;border-left:3px solid #3b82f6;padding-left:8px;">Trạm Check-in theo Tỉnh</div>
+            <div style="font-size:13px;font-weight:600;color:#fff;margin-bottom:8px;border-left:3px solid #3b82f6;padding-left:8px;" id="checkin-chart-title-a">Trạm Check-in theo Tỉnh</div>
             <div style="height:210px;overflow-x:auto;overflow-y:hidden;">
               <div style="min-width:400px;height:100%;position:relative;"><canvas id="checkin-province-chart"></canvas></div>
             </div>
           </div>
           <!-- Chart Theo Đối Tác -->
           <div style="flex:1;min-width:280px;height:280px;position:relative;background:rgba(255,255,255,0.03);padding:15px;border-radius:12px;border:1px solid var(--border-glass);">
-            <div style="font-size:13px;font-weight:600;color:#fff;margin-bottom:8px;border-left:3px solid #10b981;padding-left:8px;">Trạm Check-in theo Đối tác</div>
+            <div style="font-size:13px;font-weight:600;color:#fff;margin-bottom:8px;border-left:3px solid #10b981;padding-left:8px;" id="checkin-chart-title-b">Trạm Check-in theo Đối tác</div>
             <div style="height:210px;overflow-x:auto;overflow-y:hidden;">
               <div style="min-width:400px;height:100%;position:relative;"><canvas id="checkin-partner-chart"></canvas></div>
             </div>
@@ -103,7 +109,7 @@
       <!-- Combo Chart: Tỉnh-Đối tác -->
       <div class="dash-section" style="margin-top:15px;">
         <div style="background:rgba(255,255,255,0.03);padding:15px;border-radius:12px;border:1px solid var(--border-glass);">
-          <div style="font-size:13px;font-weight:600;color:#fff;margin-bottom:8px;border-left:3px solid #f59e0b;padding-left:8px;">Chi tiết Checkin theo Tỉnh – Đối tác</div>
+          <div style="font-size:13px;font-weight:600;color:#fff;margin-bottom:8px;border-left:3px solid #f59e0b;padding-left:8px;" id="checkin-chart-title-combo">Chi tiết Checkin theo Tỉnh – Đối tác</div>
           <div style="height:240px;overflow-x:auto;overflow-y:hidden;">
             <div style="min-width:600px;height:100%;position:relative;">
               <canvas id="checkin-combo-chart"></canvas>
@@ -119,9 +125,9 @@
           <table class="dash-table" id="checkin-report-table">
             <thead>
               <tr>
-                <th>Tỉnh</th>
+                <th id="checkin-th-a">Tỉnh</th>
                 <th>Trạm</th>
-                <th>Đối tác</th>
+                <th id="checkin-th-b">Đối tác</th>
                 <th>User</th>
                 <th>Thời gian Check-in</th>
               </tr>
@@ -527,15 +533,21 @@
 
       <!-- Filters: chung cho các biểu đồ -->
       <div class="dash-section">
+        <!-- Nhãn 2 bộ lọc đổi theo cột nhóm của dự án đang xem (DashboardManager
+             tự đặt lại text và ẩn hẳn ô nếu dự án không có cột tương ứng) -->
         <div class="dash-filter-row">
-          <label style="font-size:12px;color:#94a3b8;">Tỉnh:</label>
-          <select id="dash-filter-tinh" class="map-filter-select" onchange="App.refreshDashboardFilter()">
-            <option value="">Tất cả</option>
-          </select>
-          <label style="font-size:12px;color:#94a3b8;">Đối tác:</label>
-          <select id="dash-filter-doitac" class="map-filter-select" onchange="App.refreshDashboardFilter()">
-            <option value="">Tất cả</option>
-          </select>
+          <span class="dash-filter-item">
+            <label for="dash-filter-tinh" style="font-size:12px;color:#94a3b8;">Tỉnh:</label>
+            <select id="dash-filter-tinh" class="map-filter-select" onchange="App.refreshDashboardFilter()">
+              <option value="">Tất cả</option>
+            </select>
+          </span>
+          <span class="dash-filter-item">
+            <label for="dash-filter-doitac" style="font-size:12px;color:#94a3b8;">Đối tác:</label>
+            <select id="dash-filter-doitac" class="map-filter-select" onchange="App.refreshDashboardFilter()">
+              <option value="">Tất cả</option>
+            </select>
+          </span>
         </div>
       </div>
 

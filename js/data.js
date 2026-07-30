@@ -146,6 +146,7 @@ export const DataService = {
     try {
       const result = await this.apiCall(null, 'POST', {
         action: 'updateSiteField',
+        project: Projects.currentId,
         site: siteData.site,
         field: siteData.field,
         value: siteData.value,
@@ -231,10 +232,48 @@ export const DataService = {
   // Suy ra cột Status từ giá trị tiến độ của dự án đang xem. Phải khớp computeStatus()
   // trong Code.gs. Trước đây quy tắc này bị chép ra 4 nơi (2 trong Code.gs, app.js,
   // data.js) và đã lệch nhau, gây lỗi "marker đỏ rồi mất". Sửa quy tắc chỉ sửa ở đây.
+  // Mỗi dự án có thể dùng bộ giá trị riêng (Newsite: Chưa thuê → Phát sóng), lấy từ
+  // registry backend gửi về lúc đăng nhập. Dự án không khai thì giữ quy tắc mặc định.
   computeStatus(progressValue) {
     const v = String(progressValue || '').trim();
+    const project = Projects.current() || {};
+
+    if (project.doneValues || project.inProgressValues) {
+      const lower = v.toLowerCase();
+      const has = (list) => Array.isArray(list)
+        && list.some(x => String(x).trim().toLowerCase() === lower);
+      if (has(project.doneValues)) return 'Hoàn thành';
+      if (has(project.inProgressValues)) return 'Đang thực hiện';
+      return 'Chưa thực hiện';
+    }
+
     if (v === 'Hoàn thành') return 'Hoàn thành';
     if (v === 'Đang thực hiện') return 'Đang thực hiện';
+    return 'Chưa thực hiện';
+  },
+
+  /**
+   * Trạng thái của cả một trạm — bản sao của computeSiteStatus() trong Config.gs.
+   * Dự án khai `progressFields` (Swap: 4G + 5G) chỉ tính Hoàn thành khi TẤT CẢ các
+   * cột đều xong; chỉ có 1 cột đang dở thì vẫn là Đang thực hiện.
+   */
+  computeSiteStatus(site) {
+    if (!site) return 'Chưa thực hiện';
+    const project = Projects.current() || {};
+    const fields = project.progressFields;
+
+    if (!fields || !fields.length) {
+      return this.computeStatus(site[Projects.progressField()]);
+    }
+
+    let done = 0, started = 0;
+    fields.forEach(f => {
+      const st = this.computeStatus(site[f]);
+      if (st === 'Hoàn thành') { done++; started++; }
+      else if (st === 'Đang thực hiện') started++;
+    });
+    if (done === fields.length) return 'Hoàn thành';
+    if (started > 0) return 'Đang thực hiện';
     return 'Chưa thực hiện';
   },
 
@@ -254,7 +293,9 @@ export const DataService = {
     sites[index]['Ghi chú (TKTU ONSITE)'] = siteData.note || '';
     sites[index]['User cập nhật'] = siteData.username || '';
     sites[index]['Ngày cập nhật'] = new Date().toLocaleString('vi-VN');
-    sites[index]['Status'] = this.computeStatus(siteData.progressValue);
+    // Tính lại từ cả trạm (đã gán giá trị mới ở trên) để dự án nhiều cột tiến độ
+    // không bị báo Hoàn thành khi mới xong 1 cột
+    sites[index]['Status'] = this.computeSiteStatus(sites[index]);
 
     Storage.setSitesData(sites);
   },
@@ -266,6 +307,12 @@ export const DataService = {
     if (!site) return 'default';
 
     let statusCol = site['status'] || site['Status'] || site['STATUS'] || site['Trạng thái'];
+
+    // Sheet của dự án không có cột Trạng thái (vd PRJ_NEWSITE) thì suy thẳng từ (các)
+    // cột tiến độ. Thiếu bước này thì mọi trạm đều rơi về 'default': Dashboard đếm
+    // Hoàn thành = 0, tiến độ 0%, marker sai màu — sai âm thầm, không báo lỗi.
+    if (!statusCol) statusCol = this.computeSiteStatus(site);
+
     if (statusCol) {
       statusCol = String(statusCol).trim().toLowerCase();
       if (statusCol === 'hoàn thành' || statusCol === 'completed') {
@@ -366,7 +413,7 @@ export const DataService = {
   // ============================================================
   async searchSiteOnline(siteName) {
     try {
-      const result = await this.apiCall({ action: 'searchSiteOnline', site: siteName, pro: Storage.getSession()?.pro, role: Storage.getSession()?.role });
+      const result = await this.apiCall({ action: 'searchSiteOnline', site: siteName, project: Projects.currentId, pro: Storage.getSession()?.pro, role: Storage.getSession()?.role });
       return result;
     } catch (e) {
       console.error('Lỗi khi tìm kiếm trạm online:', e);
@@ -376,7 +423,7 @@ export const DataService = {
 
   async fetchSiteDictionary() {
     try {
-      const result = await this.apiCall({ action: 'getSiteDictionary', pro: Storage.getSession()?.pro, role: Storage.getSession()?.role });
+      const result = await this.apiCall({ action: 'getSiteDictionary', project: Projects.currentId, pro: Storage.getSession()?.pro, role: Storage.getSession()?.role });
       if (result.success && result.dictionary) {
         return result.dictionary;
       } else {

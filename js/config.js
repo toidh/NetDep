@@ -22,8 +22,9 @@ export const AppConfig = {
   MAP_MIN_ZOOM: 8,
   MAP_MAX_ZOOM: 19,
 
-  // Data refresh interval (milliseconds) - 5 minutes
-  DATA_REFRESH_INTERVAL: 5 * 60 * 1000,
+  // Chu kỳ tự tải lại dữ liệu mặc định — dự án nào cần khác thì khai
+  // refreshMinutes trong PROJECTS (Config.gs), ví dụ doithu = 120 phút
+  DATA_REFRESH_INTERVAL: 15 * 60 * 1000,
 
   COLORS: {
     // Marker colors based on 'Danh sách' column

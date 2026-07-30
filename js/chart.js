@@ -1,4 +1,5 @@
 import { DataService } from './data.js';
+import { Projects } from './projects.js';
 
 /**
  * NetDep - Chart Module
@@ -9,6 +10,24 @@ export const ChartManager = {
   renderCharts(sites) {
     if (!window.Chart) return;
     try {
+      // Cột nhóm và phạm vi thống kê lấy từ registry của dự án đang xem, không
+      // giả định sheet nào cũng có 'Danh sách' / 'Tỉnh mới' / 'Đối tác'.
+      const gf = Projects.groupFields(sites);
+      const fieldA = gf[0] || '';
+      const fieldB = gf[1] || '';
+      const val = (s, f) => {
+        if (!f) return '';
+        let v = s[f];
+        if ((v === undefined || v === '') && f === 'Tỉnh mới') v = s['Tỉnh'];
+        return String(v || 'Khác').trim() || 'Khác';
+      };
+      // Lọc phạm vi: dùng chung quy tắc với Dashboard (cột thiếu -> lấy tất cả)
+      const inScope = (() => {
+        const scoped = Projects.scopeSites(sites);
+        if (scoped.length === sites.length) return null; // không lọc gì
+        const set = new Set(scoped);
+        return s => set.has(s);
+      })();
       const fmt2 = n => String(n).padStart(2, '0');
       const today = new Date();
       const todayKey = `${fmt2(today.getDate())}/${fmt2(today.getMonth() + 1)}`;
@@ -67,41 +86,44 @@ export const ChartManager = {
         });
       };
 
-      // Calculate Province Totals for sorting
+      // Tổng theo nhóm A, dùng để sắp xếp biểu đồ thứ 2
       const provTotals = {};
       sites.forEach(s => {
-        if (String(s['Danh sách'] || '').trim().toLowerCase() === 'triển khai') {
-          const t = String(s['Tỉnh mới'] || 'Khác').trim();
-          provTotals[t] = (provTotals[t] || 0) + 1;
-        }
+        if (inScope && !inScope(s)) return;
+        const t = val(s, fieldA);
+        provTotals[t] = (provTotals[t] || 0) + 1;
       });
 
-      renderCombo(
-        'chart-partners',
-        s => String(s['Tỉnh mới'] || 'Khác').trim(),
-        'chartPartInstance',
-        null,
-        'Tiến độ theo Tỉnh',
-        s => String(s['Danh sách'] || '').trim().toLowerCase() === 'triển khai'
-      );
+      if (fieldA) {
+        renderCombo(
+          'chart-partners',
+          s => val(s, fieldA),
+          'chartPartInstance',
+          null,
+          'Tiến độ theo ' + fieldA,
+          inScope
+        );
+      }
 
-      renderCombo(
-        'chart-class',
-        s => {
-          const t = String(s['Tỉnh mới'] || 'Khác').trim();
-          const d = String(s['Đối tác'] || 'Khác').trim();
-          return `${t} - ${d}`;
-        },
-        'chartClassInstance',
-        (a, b, groups) => {
-          const tA = a.split(' - ')[0];
-          const tB = b.split(' - ')[0];
-          if (tA !== tB) return (provTotals[tA] || 0) - (provTotals[tB] || 0);
-          return groups[a].total - groups[b].total;
-        },
-        'Tiến độ theo Đối tác (Tỉnh)',
-        s => String(s['Danh sách'] || '').trim().toLowerCase() === 'triển khai'
-      );
+      // Biểu đồ ghép 2 cấp chỉ có nghĩa khi dự án có đủ 2 cột nhóm
+      if (fieldA && fieldB) {
+        renderCombo(
+          'chart-class',
+          s => `${val(s, fieldA)} - ${val(s, fieldB)}`,
+          'chartClassInstance',
+          (a, b, groups) => {
+            const tA = a.split(' - ')[0];
+            const tB = b.split(' - ')[0];
+            if (tA !== tB) return (provTotals[tA] || 0) - (provTotals[tB] || 0);
+            return groups[a].total - groups[b].total;
+          },
+          `Tiến độ theo ${fieldB} (${fieldA})`,
+          inScope
+        );
+      } else {
+        const c = document.getElementById('chart-class');
+        if (c && c.parentElement) c.parentElement.style.display = 'none';
+      }
 
       // ----- Overall Donut -----
       const ctxOverall = document.getElementById('chart-overall');
@@ -199,14 +221,25 @@ export const ChartManager = {
     if (!ctx) return;
     if (window.chartDailyPartnerTinhInstance) window.chartDailyPartnerTinhInstance.destroy();
 
-    const byProvPartner = {}; // { [tinh]: { [doiTac]: count } }
+    // Biểu đồ này cần cột ngày cập nhật; dự án không có thì để trống, không lỗi
+    const gf = Projects.groupFields(sites);
+    const fA = gf[0] || '';
+    const fB = gf[1] || '';
+    const gval = (s, f, dflt) => {
+      if (!f) return dflt;
+      let v = s[f];
+      if ((v === undefined || v === '') && f === 'Tỉnh mới') v = s['Tỉnh'];
+      return String(v || dflt).trim() || dflt;
+    };
+
+    const byProvPartner = {}; // { [nhómA]: { [nhómB]: count } }
     sites.forEach(s => {
       if (DataService.getSiteStatus(s) !== 'completed') return;
       const d = parseDate(s['Ngày cập nhật']);
       if (!d || d.getDate() !== today.getDate() || d.getMonth() !== today.getMonth() || d.getFullYear() !== today.getFullYear()) return;
 
-      const tinh = String(s['Tỉnh mới'] || s['Tỉnh'] || 'Khác').trim() || 'Khác';
-      const doiTac = String(s['Đối tác'] || 'Khác').trim() || 'Khác';
+      const tinh = gval(s, fA, 'Khác');
+      const doiTac = gval(s, fB, 'Khác');
       if (!byProvPartner[tinh]) byProvPartner[tinh] = {};
       byProvPartner[tinh][doiTac] = (byProvPartner[tinh][doiTac] || 0) + 1;
     });

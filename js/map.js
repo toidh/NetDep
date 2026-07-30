@@ -461,6 +461,62 @@ export const MapManager = {
   },
 
   // ============================================================
+  // Điểm toạ độ gõ tay (dự án bật coordSearch)
+  // ============================================================
+  coordMarker: null,
+
+  /**
+   * Đánh dấu một toạ độ người dùng gõ vào ô tìm kiếm. Dùng cho trạm đối thủ —
+   * chưa có mã trạm trong hệ thống nên không thể tra theo tên, chỉ có vị trí.
+   * Mỗi lần tìm chỉ giữ 1 điểm, tránh rải marker rác khắp bản đồ.
+   */
+  showCoordinateMarker(lat, lng) {
+    if (!this.map) return;
+    if (this.coordMarker) {
+      this.map.removeLayer(this.coordMarker);
+      this.coordMarker = null;
+    }
+
+    const icon = L.divIcon({
+      className: '',
+      html: `<div style="position:relative;transform:translate(-50%,-100%);">
+          <svg width="30" height="40" viewBox="0 0 24 32">
+            <path d="M12 0C5.4 0 0 5.4 0 12c0 9 12 20 12 20s12-11 12-20c0-6.6-5.4-12-12-12z" fill="#f59e0b" stroke="#fff" stroke-width="1.5"/>
+            <circle cx="12" cy="12" r="4.5" fill="#fff"/>
+          </svg>
+        </div>`,
+      iconSize: [30, 40],
+      iconAnchor: [0, 0],
+    });
+
+    this.coordMarker = L.marker([lat, lng], { icon }).addTo(this.map);
+    this.coordMarker.bindPopup(`
+      <div style="font-family:'Inter',sans-serif;font-size:12px;min-width:190px;">
+        <div style="font-weight:700;font-size:13px;margin-bottom:6px;color:#f59e0b;">📍 Vị trí đã nhập</div>
+        <div style="color:#94a3b8;margin-bottom:8px;">${lat}, ${lng}</div>
+        <button onclick="App.navigateToCoordinates(${lat}, ${lng})"
+          style="width:100%;padding:8px;border:none;border-radius:8px;background:#3b82f6;color:#fff;font-weight:600;cursor:pointer;font-family:inherit;">
+          Dẫn đường tới đây
+        </button>
+      </div>`, { maxWidth: 240 });
+
+    // Huỷ animation đang chạy dở trước khi bay, nếu không lệnh flyTo có thể bị
+    // nuốt mất và bản đồ đứng yên (hay gặp ngay sau khi bản đồ vừa khởi tạo).
+    if (this.map.stop) this.map.stop();
+    this.map.flyTo([lat, lng], 17, { duration: 1 });
+
+    // Mở popup khi bay xong; kèm hẹn giờ dự phòng phòng khi moveend không kích hoạt
+    let opened = false;
+    const openIt = () => {
+      if (opened || !this.coordMarker) return;
+      opened = true;
+      this.coordMarker.openPopup();
+    };
+    this.map.once('moveend', openIt);
+    setTimeout(openIt, 1400);
+  },
+
+  // ============================================================
   // Navigate to Site (Open in Google Maps)
   // ============================================================
   navigateToSite(lat, lng) {
