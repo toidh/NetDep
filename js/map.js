@@ -34,6 +34,8 @@ export const MapManager = {
     const center = savedState ? savedState.center : AppConfig.MAP_CENTER;
     const zoom = savedState ? savedState.zoom : AppConfig.MAP_ZOOM;
 
+    this.applyTileSeamFix();
+
     this.map = L.map('map', {
       preferCanvas: true,
       rotate: true,
@@ -123,6 +125,39 @@ export const MapManager = {
 
     // Two-finger touch rotation (mobile)
     
+  },
+
+  /**
+   * Bật fix khe hở giữa các ô ảnh bản đồ — chỉ khi tỉ lệ hiển thị lẻ.
+   *
+   * Ở tỉ lệ 100% (devicePixelRatio nguyên) các tile khớp nhau chính xác, KHÔNG được
+   * nới thêm: kéo 256 → 256.5px buộc trình duyệt nội suy lại ảnh và tự sinh vạch sáng
+   * ở mép, tức là tạo ra đúng lỗi đang muốn sửa (đã kiểm chứng bằng ảnh chụp A/B).
+   * Chỉ ở tỉ lệ lẻ (125%, 150%...) mới có khe thật cần lấp.
+   *
+   * Người dùng đổi tỉ lệ zoom trình duyệt giữa chừng → devicePixelRatio đổi theo, nên
+   * theo dõi bằng matchMedia để bật/tắt lại cho đúng.
+   */
+  applyTileSeamFix() {
+    const update = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const fractional = Math.abs(dpr - Math.round(dpr)) > 0.001;
+      document.body.classList.toggle('tile-seam-fix', fractional);
+    };
+    update();
+
+    if (!this._dprWatcher && window.matchMedia) {
+      // Không có sự kiện riêng cho devicePixelRatio; mẹo chuẩn là nghe media query
+      // gắn với đúng giá trị dpr hiện tại — nó ngừng khớp ngay khi dpr đổi.
+      const watch = () => {
+        const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+        const onChange = () => { update(); watch(); };
+        if (mq.addEventListener) mq.addEventListener('change', onChange, { once: true });
+        else if (mq.addListener) mq.addListener(onChange);
+      };
+      watch();
+      this._dprWatcher = true;
+    }
   },
 
   // ============================================================

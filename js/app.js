@@ -1370,26 +1370,9 @@ export const App = {
   // ============================================================
   // Stats Dashboard
   // ============================================================
+  // Thanh thống kê nổi trên bản đồ đã bỏ (số liệu xem ở Dashboard) — hàm giữ lại
+  // vì còn nhiệm vụ cập nhật badge số thay đổi đang chờ đồng bộ trên nút Làm mới.
   updateStats() {
-    if (!this.sites || !Array.isArray(this.sites)) return;
-    // Only count 'Triển khai' sites for stats bar
-    const trienKhaiSites = this.sites.filter(s =>
-      String(s['Danh sách'] || '').trim().toLowerCase() === 'triển khai'
-    );
-    const total = trienKhaiSites.length;
-    const completed = trienKhaiSites.filter((s) => DataService.getSiteStatus(s) === 'completed').length;
-    const notUpdated = total - completed;
-
-    const el = document.getElementById('stats-bar');
-    if (el) {
-      el.innerHTML = `
-        <span class="stat-item" title="Tổng"><span class="stat-icon">📡</span>${total}</span>
-        <span class="stat-item stat-completed" title="Hoàn thành"><span class="stat-icon">✅</span>${completed}</span>
-        <span class="stat-item stat-pending" title="Chưa cập nhật"><span class="stat-icon">⏳</span>${notUpdated}</span>
-      `;
-    }
-
-    // Update pending badge
     const pendingCount = Storage.getPendingUpdates().length;
     const badge = document.getElementById('pending-badge');
     if (badge) {
