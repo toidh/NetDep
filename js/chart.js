@@ -107,6 +107,10 @@ export const ChartManager = {
 
       // Biểu đồ ghép 2 cấp chỉ có nghĩa khi dự án có đủ 2 cột nhóm
       if (fieldA && fieldB) {
+        // 'flex' chứ không phải '' — khối này bố cục bằng flex trong style inline,
+        // trả về rỗng là mất luôn bố cục đó.
+        const sec = document.getElementById('chart-class-section');
+        if (sec) sec.style.display = 'flex';
         renderCombo(
           'chart-class',
           s => `${val(s, fieldA)} - ${val(s, fieldB)}`,
@@ -121,8 +125,10 @@ export const ChartManager = {
           inScope
         );
       } else {
-        const c = document.getElementById('chart-class');
-        if (c && c.parentElement) c.parentElement.style.display = 'none';
+        // Ẩn CẢ khối, không chỉ canvas: dự án 1 cột nhóm (Newsite) mà chỉ ẩn canvas
+        // thì trên Dashboard còn lại một khung viền rỗng, trông như biểu đồ lỗi.
+        const sec = document.getElementById('chart-class-section');
+        if (sec) sec.style.display = 'none';
       }
 
       // ----- Overall Donut -----
@@ -153,7 +159,15 @@ export const ChartManager = {
       }
 
       // ----- Daily Line Chart -----
-      const ctxDaily = document.getElementById('chart-daily-line');
+      // Hai biểu đồ "theo ngày" dựa vào 'Ngày cập nhật' + 'Đối tác' — dự án theo dõi
+      // theo mốc dài ngày (Newsite) không dùng tới, khai dailyCharts:false để ẩn.
+      const showDaily = Projects.dashboardConfig().dailyCharts !== false;
+      const dailySec = document.getElementById('chart-daily-section');
+      const partnerSec = document.getElementById('chart-daily-partner-section');
+      if (dailySec) dailySec.style.display = showDaily ? '' : 'none';
+      if (partnerSec) partnerSec.style.display = showDaily ? '' : 'none';
+
+      const ctxDaily = showDaily ? document.getElementById('chart-daily-line') : null;
       if (ctxDaily) {
         const dMap = {};
         dMap[todayKey] = { date: today, count: 0 };
@@ -207,11 +221,88 @@ export const ChartManager = {
         });
       }
 
-      this.renderDailyCompletedByPartnerTinh(sites, parseDate, today);
+      this.renderMonthChart(sites, parseDate);
+      if (showDaily) this.renderDailyCompletedByPartnerTinh(sites, parseDate, today);
 
     } catch (err) {
       console.error('Lỗi khi vẽ biểu đồ:', err);
     }
+  },
+
+  /**
+   * Số trạm theo THÁNG của một cột ngày do registry chỉ định
+   * (`dashboard.monthChart: { field: 'Ngày phát sóng', label: '...' }`).
+   *
+   * Newsite dùng để xem sản lượng phát sóng từng tháng — cột 'Ngày phát sóng' là mốc
+   * thật của trạm, không suy ra được từ 'Ngày cập nhật' (ngày ai đó sửa dòng dữ liệu).
+   * Dự án không khai, hoặc sheet chưa có cột đó, thì ẩn hẳn khối thay vì vẽ biểu đồ rỗng.
+   */
+  renderMonthChart(sites, parseDate) {
+    const section = document.getElementById('chart-month-section');
+    const ctx = document.getElementById('chart-month');
+    if (!section || !ctx) return;
+
+    const cfg = Projects.dashboardConfig().monthChart;
+    const field = cfg && cfg.field ? Projects.resolveField(sites, cfg.field) : null;
+    if (window.chartMonthInstance) { window.chartMonthInstance.destroy(); window.chartMonthInstance = null; }
+    if (!field) { section.style.display = 'none'; return; }
+
+    // Gom theo tháng, giữ mốc thời gian để sắp xếp đúng thứ tự (không sort chuỗi 'MM/yyyy')
+    const months = {};
+    sites.forEach(s => {
+      const d = parseDate(s[field]);
+      if (!d) return;
+      const key = String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear();
+      if (!months[key]) months[key] = { sort: d.getFullYear() * 12 + d.getMonth(), count: 0 };
+      months[key].count++;
+    });
+
+    const keys = Object.keys(months).sort((a, b) => months[a].sort - months[b].sort);
+    if (!keys.length) { section.style.display = 'none'; return; }
+
+    section.style.display = '';
+    const title = document.getElementById('chart-month-title');
+    const label = cfg.label || ('Số trạm theo tháng — ' + cfg.field);
+    if (title) title.textContent = label;
+
+    // Luỹ kế đi kèm cột từng tháng: nhìn được cả sản lượng tháng lẫn tổng đã đạt
+    let running = 0;
+    const counts = keys.map(k => months[k].count);
+    const cumulative = counts.map(n => (running += n));
+
+    const dlPlugin = window.ChartDataLabels ? [window.ChartDataLabels] : [];
+    window.chartMonthInstance = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: keys,
+        datasets: [
+          {
+            type: 'bar', label: 'Trong tháng', data: counts,
+            backgroundColor: '#10b981', borderColor: '#10b981', borderWidth: 1, yAxisID: 'y',
+            datalabels: { display: true, color: '#fff', anchor: 'center', align: 'center', font: { weight: 'bold', size: 12 }, formatter: v => v || '' }
+          },
+          {
+            type: 'line', label: 'Luỹ kế', data: cumulative,
+            borderColor: '#3b82f6', backgroundColor: '#3b82f6', borderWidth: 2, pointRadius: 4, yAxisID: 'y1',
+            datalabels: { display: true, color: '#bfdbfe', anchor: 'end', align: 'top', font: { weight: 'bold', size: 11 }, formatter: v => v || '' }
+          }
+        ]
+      },
+      plugins: dlPlugin,
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        layout: { padding: { top: 24 } },
+        plugins: {
+          legend: { display: true, position: 'top', labels: { color: '#e2e8f0', usePointStyle: true, boxWidth: 8, font: { size: 11, weight: 'bold' } } },
+          title: { display: false }
+        },
+        scales: {
+          x: { ticks: { color: '#cbd5e1', font: { size: 11, weight: 'bold' }, maxRotation: 45 }, grid: { color: 'rgba(255,255,255,0.05)' } },
+          y: { beginAtZero: true, grace: '20%', grid: { color: 'rgba(255,255,255,0.08)' }, ticks: { color: '#94a3b8', font: { size: 11 }, precision: 0 } },
+          y1: { position: 'right', beginAtZero: true, grace: '20%', grid: { drawOnChartArea: false }, ticks: { color: '#3b82f6', font: { size: 11, weight: 'bold' }, precision: 0 } }
+        }
+      }
+    });
   },
 
   // ----- Tiến độ ngày theo Đối tác (Tỉnh): số trạm hoàn thành trong ngày -----

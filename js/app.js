@@ -334,6 +334,18 @@ export const App = {
 
     document.getElementById('comment-submit')?.addEventListener('click', () => this.submitComment());
 
+    // Ảnh kiểm soát: nút bấm mở luôn camera/thư viện, chọn xong là tải lên
+    const photoBtn = document.getElementById('photo-upload-btn');
+    const photoInput = document.getElementById('photo-upload-input');
+    if (photoBtn && photoInput) {
+      photoBtn.addEventListener('click', () => photoInput.click());
+      photoInput.addEventListener('change', async (e) => {
+        const files = [...(e.target.files || [])];
+        e.target.value = '';   // cho phép chọn lại đúng file vừa chọn
+        await this.handlePhotoUpload(files);
+      });
+    }
+
     document.getElementById('ai-assistant-btn')?.addEventListener('click', () => {
       if (window.AIAssistant) window.AIAssistant.openChat();
     });
@@ -484,10 +496,14 @@ export const App = {
   // (switchProject) thay vì chép lại toàn bộ luồng.
   async loadProjectData() {
     if (!['view_limited', 'doitac'].includes(Auth.getRole())) {
+      // Hai request độc lập nhau -> bắn đi CÙNG LÚC. Trước đây chờ xong trạm mới gọi
+      // sector nên tổng thời gian bằng tổng hai lần chờ backend (đo được ~7s + ~12s);
+      // chạy song song thì chỉ còn bằng cái lâu hơn.
+      const sectorsPromise = DataService.fetchSectors();
       this.sites = await DataService.fetchSites();
       MapManager.loadSites(this.sites);
       this.updateStats();
-      DataService.fetchSectors().then(sectors => MapManager.loadSectors(sectors));
+      sectorsPromise.then(sectors => MapManager.loadSectors(sectors));
     } else {
       // Online-only view limited
       this.sites = [];
@@ -712,15 +728,18 @@ export const App = {
     // Info fields
     const canEdit = ['admin', 'manager'].includes(Auth.getRole());
     
-    // Only Phân loại is editable as requested
-    const phanLoaiVal = site['Danh sách'] || site['Phân loại'] || '-';
+    // Only Phân loại is editable as requested.
+    // Tên cột khác nhau giữa các dự án: 5G dùng 'Danh sách', Swap dùng 'Phân loại'.
+    // Phải ghi vào ĐÚNG cột mà sheet dự án đang có, không ghi cứng 'Danh sách'.
+    const phanLoaiCol = Object.prototype.hasOwnProperty.call(site, 'Danh sách') ? 'Danh sách' : 'Phân loại';
+    const phanLoaiVal = site[phanLoaiCol] || site['Danh sách'] || site['Phân loại'] || '-';
     const phanLoaiEl = document.getElementById('modal-phan-loai');
     if (phanLoaiEl) {
       if (canEdit) {
         phanLoaiEl.innerHTML = `${phanLoaiVal} <span id="btn-edit-phanloai" style="cursor:pointer;opacity:0.8;font-size:12px;margin-left:4px;" title="Sửa Phân loại">✏️</span>`;
         document.getElementById('btn-edit-phanloai')?.addEventListener('click', (e) => {
           e.stopPropagation();
-          this.editSiteField(site['Site'], 'Danh sách', 'Phân loại', phanLoaiVal);
+          this.editSiteField(site['Site'], phanLoaiCol, 'Phân loại', phanLoaiVal);
         });
       } else {
         phanLoaiEl.textContent = phanLoaiVal;
@@ -735,9 +754,27 @@ export const App = {
     document.getElementById('modal-sdt-ft').textContent = site['SĐT FT'] || '-';
     document.getElementById('modal-tktu').textContent = site['TKTU'] || site['TKTU ONSITE'] || '-';
     document.getElementById('modal-sdt-tktu').textContent = site['SĐT TKTU'] || site['SĐT TKTU ONSITE'] || '-';
-    const noteValTktu = site['NOTE'] || site['NOTE TKTU'] || '-';
+
+    // Dự án không dùng khối Liên hệ (Newsite) thì ẩn hẳn thay vì hiện 6 ô toàn dấu '-'.
+    const contactSection = document.getElementById('contact-section');
+    if (contactSection) contactSection.style.display = Projects.contactEnabled() ? '' : 'none';
+
+    // Các khối khác của modal cũng theo registry: sheet không có những cột đó thì ẩn
+    // hẳn, đỡ phải cuộn qua một loạt khung chỉ toàn dấu '-' (CSDL).
+    [['site-info-section', 'info'],
+     ['media-section', 'media'],
+     ['integration-section', 'integration']].forEach(([id, key]) => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const show = Projects.modalSection(key);
+      // media-section bố cục bằng flex trong style inline, trả về '' là mất bố cục
+      el.style.display = show ? (id === 'media-section' ? 'flex' : '') : 'none';
+    });
+
+    const noteKey = this.findNoteKey(site);
+    const noteValTktu = (noteKey && String(site[noteKey]).trim()) || '-';
     document.getElementById('modal-note-tktu').textContent = noteValTktu;
-    
+
     const editSpan = document.getElementById('modal-note-edit');
     if (editSpan) {
       if (canEdit) {
@@ -748,7 +785,9 @@ export const App = {
       }
     }
 
-    // Integration Info
+    // Integration Info — ô IP có sẵn trong HTML nhưng trước đây không hàm nào gán
+    // giá trị nên luôn hiện '-' dù sheet có cột IP.
+    document.getElementById('modal-ip').textContent = site['IP'] || '-';
     document.getElementById('modal-srt').textContent = site['SRT'] || '-';
     document.getElementById('modal-port').textContent = site['Port'] || '-';
 
@@ -758,6 +797,7 @@ export const App = {
     document.getElementById('modal-last-update').textContent = `${lastUser} - ${lastDate}`;
 
     // Form values — nhãn/lựa chọn/các cột phụ đều theo dự án đang xem
+    this.renderPhotoHints(site);
     this.renderProgressField(site);
     document.getElementById('update-note').value = '';
 
@@ -780,6 +820,10 @@ export const App = {
     if (historyEl) {
       historyEl.textContent = noteVal;
       historyEl.style.display = noteVal ? 'block' : 'none';
+      // Nhãn phải ẩn/hiện theo khung nội dung, nếu không trạm chưa có ghi chú nào vẫn
+      // hiện chữ "Lịch sử Ghi chú" đứng trơ không có gì bên dưới.
+      const historyLabel = document.getElementById('update-note-history-label');
+      if (historyLabel) historyLabel.style.display = noteVal ? '' : 'none';
       setTimeout(() => historyEl.scrollTop = historyEl.scrollHeight, 10);
     }
 
@@ -795,11 +839,16 @@ export const App = {
       String(s['Site'] || '').trim().toUpperCase() === String(site['Site'] || '').trim().toUpperCase()
     );
 
-    // 6. Async Data Loads
+    // 6. Async Data Loads — khối nào bị ẩn thì khỏi gọi API cho khối đó, vừa đỡ chờ
+    // vừa không làm phiền backend (Drive quét ảnh sơ đồ khá chậm).
     this.loadWeatherForecast(lat, lng);
+    if (Projects.modalSection('media')) {
       this.loadDiagrams(siteName);
       this.loadCheckinImage(site);
-    this.loadSiteConfig(siteName);
+    }
+    if (Projects.modalSection('integration')) {
+      this.loadSiteConfig(siteName);
+    }
     this.loadComments(siteName);
 
     // Store current site for update
@@ -820,29 +869,166 @@ export const App = {
   // Nhãn, các lựa chọn trong dropdown và những cột phụ hiển thị đều lấy từ
   // registry. Thêm dự án mới chỉ cần khai báo trong PROJECTS của Code.gs,
   // không phải sửa hàm này.
-  renderProgressField(site) {
-    const project = Projects.current();
-    const field = Projects.progressField();
-    const options = Projects.progressOptions();
+  /**
+   * Khối "Gợi ý chụp ảnh kiểm soát" — nhắc người đi hiện trường cần chụp những gì.
+   * Nội dung khai trong registry (`photoHints`) chứ không ghi cứng ở đây: mỗi dự án
+   * kiểm tra một thứ khác nhau, và sửa danh sách không phải đụng vào code frontend.
+   */
+  renderPhotoHints(site) {
+    const section = document.getElementById('photo-hints-section');
+    const list = document.getElementById('photo-hints-list');
+    if (!section || !list) return;
 
-    const label = document.getElementById('update-progress-label');
-    if (label) label.textContent = field;
-
-    const select = document.getElementById('update-progress');
-    if (select) {
-      const current = String(site[field] || '').trim();
-      select.innerHTML = options
-        .map(o => `<option value="${o}">${o}</option>`)
-        .join('');
-      // Giá trị lạ (hoặc trống) → về lựa chọn đầu tiên thay vì để select rỗng
-      select.value = options.indexOf(current) >= 0 ? current : options[0];
+    const hints = Projects.photoHints();
+    const photoCol = Projects.photoColumn();
+    if (!hints.length && !photoCol) {
+      section.style.display = 'none';
+      list.innerHTML = '';
+      return;
     }
 
-    // Các cột phụ của dự án (chỉ đọc). Bỏ qua cột tiến độ vì đã có dropdown ở trên.
+    const esc = (s) => String(s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    list.innerHTML = hints.map(h => `<li>${esc(h)}</li>`).join('');
+    section.style.display = '';
+
+    // Nút tải ảnh chỉ hiện khi dự án có cột lưu link VÀ tài khoản được sửa dự án đó
+    const box = document.getElementById('photo-upload-box');
+    if (box) {
+      const show = photoCol && Projects.canEdit(Auth.getRole());
+      box.style.display = show ? '' : 'none';
+      if (show) this.renderUploadedPhotos(site, photoCol);
+    }
+  },
+
+  /** Danh sách ảnh đã tải lên của trạm (đọc từ cột link trong sheet). */
+  renderUploadedPhotos(site, photoCol) {
+    const el = document.getElementById('photo-upload-list');
+    if (!el) return;
+
+    const key = Projects.resolveField(site, photoCol);
+    const links = String((key && site[key]) || '').split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+    el.innerHTML = links.length
+      ? links.map((url, i) => `<div><a href="${url}" target="_blank" style="color:var(--color-blue);">🖼️ Ảnh ${i + 1}</a></div>`).join('')
+      : '<div style="color:var(--text-muted);">Chưa có ảnh nào</div>';
+  },
+
+  /**
+   * FT chụp/chọn ảnh -> tải lên Drive, link ghi vào cột `photoColumn` của sheet dự án.
+   * Nén ảnh trước khi gửi: ảnh điện thoại 4-8MB gửi thẳng qua Apps Script rất hay
+   * timeout, mà kiểm soát chỉ cần nhìn rõ chi tiết chứ không cần ảnh gốc.
+   */
+  async handlePhotoUpload(files) {
+    const site = this.currentDetailSite;
+    const photoCol = Projects.photoColumn();
+    if (!site || !photoCol || !files || !files.length) return;
+
+    if (!Projects.canEdit(Auth.getRole())) {
+      return this.showToast('Tài khoản của bạn không có quyền tải ảnh cho dự án này', 'error');
+    }
+
+    let ok = 0;
+    for (let i = 0; i < files.length; i++) {
+      this.showLoading(`Đang tải ảnh ${i + 1}/${files.length}...`);
+      try {
+        const base64 = await this.compressImage(files[i]);
+        const res = await DataService.apiCall(null, 'POST', {
+          action: 'uploadPhoto',
+          project: Projects.currentId,
+          site: site['Site'],
+          column: photoCol,
+          prefix: 'kiemsoat',
+          imageBase64: base64,
+          username: Auth.getUsername()
+        });
+        if (res.success) {
+          ok++;
+          // Cập nhật luôn vào dữ liệu đang giữ để danh sách hiện ngay, khỏi tải lại
+          const key = Projects.resolveField(site, photoCol) || photoCol;
+          site[key] = String(site[key] || '').trim()
+            ? site[key] + '\n' + res.imageUrl
+            : res.imageUrl;
+          if (res.warning) this.showToast(res.warning, 'warning');
+        } else {
+          this.showToast('Lỗi tải ảnh: ' + (res.error || res.message), 'error');
+        }
+      } catch (e) {
+        this.showToast('Lỗi tải ảnh: ' + e.message, 'error');
+      }
+    }
+    this.hideLoading();
+
+    if (ok) {
+      this.showToast(`Đã tải lên ${ok} ảnh`, 'success');
+      this.renderUploadedPhotos(site, photoCol);
+    }
+  },
+
+  /** Thu nhỏ ảnh về tối đa 1600px cạnh dài, trả chuỗi base64 JPEG. */
+  compressImage(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error('Không đọc được file ảnh'));
+      reader.onload = () => {
+        const img = new Image();
+        img.onerror = () => reject(new Error('File không phải ảnh hợp lệ'));
+        img.onload = () => {
+          const max = 1600;
+          const scale = Math.min(1, max / Math.max(img.width, img.height));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          resolve(canvas.toDataURL('image/jpeg', 0.8));
+        };
+        img.src = reader.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  },
+
+  renderProgressField(site) {
+    const project = Projects.current();
+    // Chỉ hiện dropdown của những cột tiến độ mà trạm này THỰC SỰ cần — đúng bộ cột
+    // dùng để kết luận Hoàn thành (Swap: trạm 4G chỉ hiện Tiến độ 4G, trạm 5G_4G hiện
+    // cả hai). Dùng chung requiredProgressFields nên giao diện và cách tính Status
+    // không bao giờ lệch nhau.
+    const required = DataService.requiredProgressFields(site);
+    const fields = (required && required.length) ? required : Projects.progressFields();
+    const options = Projects.progressOptions();
+    const esc = (s) => String(s).replace(/"/g, '&quot;');
+
+    // Một dropdown cho mỗi cột tiến độ của dự án (Swap: Tiến độ 4G + Tiến độ 5G)
+    const box = document.getElementById('progress-fields-container');
+    if (box) {
+      box.innerHTML = fields.map((f, i) => {
+        const current = String(site[f] || '').trim();
+        // Sheet đang để một mốc chưa khai trong registry thì vẫn phải hiện đúng mốc đó.
+        // Thiếu bước này, dropdown rơi về lựa chọn đầu danh sách và chỉ cần bấm "Cập
+        // nhật tiến độ" là giá trị thật trong sheet bị ghi đè mà không ai kịp nhận ra.
+        const list = (current && !options.includes(current)) ? [current].concat(options) : options;
+        const opts = list
+          .map(o => `<option value="${esc(o)}"${o === current ? ' selected' : ''}>${o}</option>`)
+          .join('');
+        return `
+          <div class="form-group" style="margin-bottom:${i === fields.length - 1 ? 0 : 14}px;">
+            <label class="form-label" for="update-progress-${i}">${f}</label>
+            <select id="update-progress-${i}" class="form-select" data-field="${esc(f)}">${opts}</select>
+          </div>`;
+      }).join('');
+
+      // Ô trống → về lựa chọn đầu tiên thay vì để select rỗng
+      fields.forEach((f, i) => {
+        const sel = document.getElementById('update-progress-' + i);
+        if (sel && !sel.value) sel.value = options[0];
+      });
+    }
+
+    // Các cột phụ chỉ-đọc của dự án, bỏ qua những cột đã có dropdown ở trên
     const extra = document.getElementById('project-extra-fields');
     if (extra) {
       const rows = (project.detailFields || [])
-        .filter(f => f !== field)
+        .filter(f => !fields.includes(f))
         .map(f => {
           const val = String(site[f] || '').trim() || '-';
           return `<div style="display:flex;justify-content:space-between;gap:8px;padding:3px 0;">
@@ -1074,6 +1260,23 @@ export const App = {
   // Sector Field Update
   // ============================================================
 
+  /**
+   * Tên cột NOTE thật của trạm.
+   * Sheet có tiêu đề 2 tầng (Newsite: groupRow) khiến tên cột bị ghép thành
+   * "Nhóm - NOTE", nên tra cứng site['NOTE'] luôn ra rỗng dù sheet có cột NOTE.
+   * Quy tắc khớp phải giống updateNote() trong Sites.gs — đọc và ghi cùng một cột.
+   */
+  findNoteKey(site) {
+    if (!site) return null;
+    const norm = (s) => String(s).toLowerCase().normalize('NFC').replace(/\s+/g, '');
+    const keys = Object.keys(site);
+    return keys.find(k => norm(k) === 'note')
+        || keys.find(k => norm(k).endsWith('-note'))
+        || keys.find(k => norm(k) === 'notetktu')
+        || keys.find(k => norm(k) === 'ghichú')   // thứ tự ưu tiên như updateNote()
+        || null;
+  },
+
   editNote(siteName, currentVal) {
     if (!['admin', 'manager'].includes(Auth.getRole())) return;
     this._showTextInputPicker('NOTE', siteName, currentVal || '', (newVal) => {
@@ -1088,14 +1291,14 @@ export const App = {
       }).then(res => {
         if (res.success) {
           // Update in-memory data
+          // Ghi lại đúng cột NOTE của sheet dự án (có thể là "Nhóm - NOTE"),
+          // không tạo thêm key 'NOTE' ảo không tồn tại trong dữ liệu.
           const idx = this.sites.findIndex(s => s.Site === siteName);
           if (idx !== -1) {
-            this.sites[idx]['NOTE'] = newVal;
-            this.sites[idx]['NOTE TKTU'] = newVal;
+            this.sites[idx][this.findNoteKey(this.sites[idx]) || 'NOTE'] = newVal;
           }
           if (this.currentDetailSite && this.currentDetailSite.Site === siteName) {
-            this.currentDetailSite['NOTE'] = newVal;
-            this.currentDetailSite['NOTE TKTU'] = newVal;
+            this.currentDetailSite[this.findNoteKey(this.currentDetailSite) || 'NOTE'] = newVal;
           }
           // Update DOM immediately without reopening popup
           const noteEl = document.getElementById('modal-note-tktu');
@@ -1110,13 +1313,32 @@ export const App = {
     });
   },
 
+  /**
+   * Các giá trị đang có thật trong một cột của dự án hiện tại, để dựng dropdown sửa.
+   * Kèm luôn giá trị hiện tại của trạm (kể cả cột chỉ có duy nhất trạm đó dùng).
+   */
+  distinctFieldValues(fieldName, currentValue) {
+    const set = new Set();
+    (this.sites || []).forEach(s => {
+      const v = String(s[fieldName] || '').trim();
+      if (v) set.add(v);
+    });
+    const cur = String(currentValue || '').trim();
+    if (cur && cur !== '-') set.add(cur);
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'vi'));
+  },
+
   editSiteField(siteName, fieldName, fieldDisplayName, currentValue) {
     if (!['admin', 'manager'].includes(Auth.getRole())) {
       return this.showToast('Tài khoản không có quyền chỉnh sửa', 'error');
     }
     // For 'Danh sách' / 'Phân loại', show dropdown overlay
     if (fieldName === 'Danh sách' || fieldName === 'Phân loại') {
-      this._showDropdownPicker(siteName, fieldName, fieldDisplayName, currentValue, ['Triển khai', 'Dự phòng']);
+      // Lựa chọn lấy từ chính giá trị đang có trong cột đó của dự án hiện tại.
+      // Ghi cứng ['Triển khai','Dự phòng'] là sai với dự án khác — Swap chỉ có
+      // 4G / 5G / 5G_4G, chọn giá trị lạ vào là làm bẩn dữ liệu.
+      this._showDropdownPicker(siteName, fieldName, fieldDisplayName, currentValue,
+        this.distinctFieldValues(fieldName, currentValue));
     } else {
       this._showTextInputPicker(fieldDisplayName, siteName, currentValue === '-' ? '' : currentValue, (newVal) => {
         if (newVal === null || newVal === currentValue) return;
@@ -1276,6 +1498,203 @@ export const App = {
     });
   },
 
+  /**
+   * Sửa MỘT Ô bất kỳ của dòng sector, chỉ định bằng đúng tên cột trong sheet.
+   *
+   * Khác editSectorField (map cứng 8 trường của sheet Map_sector): ở đây tên cột là
+   * chuỗi lấy thẳng từ dữ liệu, nên dùng được cho sheet có tiêu đề 2 tầng — FT nhập số
+   * đo mới vào nhóm "Dữ liệu hậu kiểm" của CSDL ngay trên bản đồ.
+   */
+  /**
+   * Lưu tất cả ô đã sửa trong popup sector bằng MỘT lần bấm.
+   *
+   * Chỉ gửi những ô thật sự đổi (so với `data-goc`): sheet CSDL có 8 ô mỗi sector, ghi
+   * lại cả 8 mỗi lần lưu vừa chậm vừa làm bẩn lịch sử sửa đổi của Google Sheets.
+   */
+  async saveSectorCells(siteName, sectorName, btn) {
+    if (!Projects.canEdit(Auth.getRole())) {
+      return App.showToast('Tài khoản của bạn không có quyền cập nhật dự án này', 'error');
+    }
+
+    const popup = btn.closest('.sector-popup');
+    if (!popup) return;
+
+    const cells = [...popup.querySelectorAll('.sector-cell-input')]
+      .filter(el => el.value.trim() !== String(el.dataset.goc || '').trim())
+      .map(el => ({ column: el.dataset.col, value: el.value.trim() }));
+
+    if (!cells.length) return App.showToast('Chưa có ô nào thay đổi', 'info');
+
+    btn.disabled = true;
+    btn.textContent = '⏳ Đang lưu...';
+    try {
+      const result = await DataService.apiCall(null, 'POST', {
+        action: 'updateSectorCell',
+        project: Projects.currentId,
+        site: siteName,
+        sector: sectorName,
+        cells: cells,
+        username: Auth.getUsername()
+      });
+
+      if (result.success) {
+        App.showToast(`Đã lưu ${cells.length} giá trị`, 'success');
+        MapManager.map.closePopup();
+        const sectors = await DataService.fetchSectors();
+        MapManager.setSectorData(sectors);
+        MapManager.renderSectors();
+      } else {
+        App.showToast('Lỗi: ' + (result.message || result.error || 'Không lưu được'), 'error');
+        btn.disabled = false;
+        btn.textContent = '💾 LƯU';
+      }
+    } catch (e) {
+      App.showToast('Lỗi khi lưu: ' + e.message, 'error');
+      btn.disabled = false;
+      btn.textContent = '💾 LƯU';
+    }
+  },
+
+  /**
+   * Chụp / chọn ảnh cho MỘT hạng mục của MỘT sector, ngay trong popup trên bản đồ.
+   *
+   * Input file được tạo động rồi bỏ đi sau khi chọn: popup Leaflet bị dựng lại mỗi lần
+   * mở nên input đặt sẵn trong popup sẽ mất listener, còn đặt cố định trong index.html
+   * thì phải nhớ trạng thái "đang chụp cho hạng mục nào" ở biến toàn cục.
+   *
+   * Không khai `capture`: để hệ điều hành hỏi Camera hay Thư viện — FT chụp tại chỗ,
+   * còn hậu kiểm nhiều khi bổ sung ảnh đã chụp từ trước.
+   */
+  pickSectorPhoto(btn) {
+    if (!Projects.canEdit(Auth.getRole())) {
+      return this.showToast('Tài khoản của bạn không có quyền tải ảnh cho dự án này', 'error');
+    }
+
+    const popup = btn.closest('.sector-popup');
+    const site = popup?.dataset.site || '';
+    const sector = popup?.dataset.sector || '';
+    const label = btn.dataset.item || '';
+    const column = (Projects.current().sectorPopup || {}).photoColumn || '';
+    if (!site || !sector || !column) {
+      return this.showToast('Dự án chưa khai cột lưu ảnh hạng mục', 'error');
+    }
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.multiple = true;                 // 1 hạng mục cho phép thêm nhiều ảnh
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    input.addEventListener('change', () => {
+      const files = [...(input.files || [])];
+      input.remove();
+      if (files.length) this.uploadSectorPhotos({ site, sector, label, column, files, btn });
+    });
+    input.click();
+  },
+
+  /**
+   * Tải ảnh hạng mục lên Drive rồi ghi link vào ô ảnh của dòng sector.
+   *
+   * Ảnh mới được gắn thẳng vào object sector đang giữ trong bộ nhớ và chèn chip số vào
+   * popup đang mở, thay vì tải lại toàn bộ sector: fetchSectors của CSDL mất vài giây,
+   * mà người dùng thường chụp liên tiếp nhiều hạng mục một lượt.
+   */
+  async uploadSectorPhotos({ site, sector, label, column, files, btn }) {
+    const sectorObj = (MapManager.sectorData || []).find(s => {
+      const sName = String(s['Site'] || s['Mã trạm'] || s['Mã Trạm'] || '').trim();
+      return sName === site && String(s['Sector'] || '').trim() === sector;
+    });
+
+    let ok = 0;
+    for (let i = 0; i < files.length; i++) {
+      this.showLoading(`Đang tải ảnh ${i + 1}/${files.length}...`);
+      try {
+        const base64 = await this.compressImage(files[i]);
+        const res = await DataService.apiCall(null, 'POST', {
+          action: 'uploadPhoto',
+          project: Projects.currentId,
+          site, sector, column, label,
+          prefix: 'sector',
+          imageBase64: base64,
+          username: Auth.getUsername()
+        });
+
+        if (res.success) {
+          ok++;
+          if (res.warning) this.showToast(res.warning, 'warning');
+          // Ghi ngược vào dữ liệu đang giữ để mở lại popup là thấy ngay
+          if (sectorObj) {
+            const key = MapManager.sectorPhotoKey(sectorObj) || column;
+            const line = (label ? label.replace(/\|/g, '/') + ' | ' : '') + res.imageUrl;
+            sectorObj[key] = String(sectorObj[key] || '').trim()
+              ? sectorObj[key] + '\n' + line
+              : line;
+          }
+          this._appendSectorPhotoChip(btn, res.imageUrl, label);
+        } else {
+          this.showToast('Lỗi tải ảnh: ' + (res.error || res.message), 'error');
+        }
+      } catch (e) {
+        this.showToast('Lỗi tải ảnh: ' + e.message, 'error');
+      }
+    }
+    this.hideLoading();
+    if (ok) this.showToast(`Đã thêm ${ok} ảnh cho "${label}"`, 'success');
+  },
+
+  /** Chèn chip số thứ tự ảnh vừa tải vào ngay trước nút ＋ của hạng mục đó. */
+  _appendSectorPhotoChip(btn, url, label) {
+    const cell = btn.parentElement;
+    if (!cell) return;
+    const n = cell.querySelectorAll('.sector-photo-chip').length + 1;
+    const a = document.createElement('a');
+    a.className = 'sector-photo-chip';
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    a.title = `${label} — ảnh ${n}`;
+    a.textContent = String(n);
+    cell.insertBefore(a, btn);
+  },
+
+  editSectorCell(siteName, sectorName, column, currentValue) {
+    if (!Projects.canEdit(Auth.getRole())) {
+      return App.showToast('Tài khoản của bạn không có quyền cập nhật thông tin này', 'error');
+    }
+
+    // Nhãn hiển thị bỏ tiền tố nhóm cho gọn ("Dữ liệu hậu kiểm - Tilt cơ" -> "Tilt cơ")
+    const label = column.includes(' - ') ? column.split(' - ').slice(1).join(' - ') : column;
+
+    this._showTextInputPicker(label, siteName + ' / ' + sectorName, currentValue === '-' ? '' : currentValue, async (newValue) => {
+      if (newValue === null || newValue === currentValue) return;
+
+      App.showLoading('Đang cập nhật sector...');
+      try {
+        const result = await DataService.apiCall(null, 'POST', {
+          action: 'updateSectorCell',
+          project: Projects.currentId,
+          site: siteName,
+          sector: sectorName,
+          column: column,
+          value: newValue,
+          username: Auth.getUsername()
+        });
+        if (result.success) {
+          App.showToast('Đã cập nhật ' + label, 'success');
+          const sectors = await DataService.fetchSectors();
+          MapManager.setSectorData(sectors);
+          MapManager.renderSectors();
+        } else {
+          App.showToast('Lỗi: ' + (result.message || result.error || 'Không cập nhật được'), 'error');
+        }
+      } catch (e) {
+        App.showToast('Lỗi khi cập nhật sector: ' + e.message, 'error');
+      }
+      App.hideLoading();
+    });
+  },
+
   // ============================================================
   // Update Progress Handler
   // ============================================================
@@ -1284,8 +1703,12 @@ export const App = {
     if (!['admin', 'manager'].includes(Auth.getRole())) return App.showToast('Tài khoản của bạn không có quyền cập nhật tiến độ', 'error');
     const form = document.getElementById('update-form');
     const siteName = form.dataset.siteName;
+    // Gom giá trị của mọi dropdown tiến độ (dự án 1 cột thì map cũng chỉ có 1 mục)
+    const progressValues = {};
+    document.querySelectorAll('#progress-fields-container select[data-field]')
+      .forEach(sel => { progressValues[sel.dataset.field] = sel.value; });
     const progressField = Projects.progressField();
-    const progressValue = document.getElementById('update-progress').value;
+    const progressValue = progressValues[progressField];
     const note = document.getElementById('update-note').value.trim();
 
     const submitBtn = document.getElementById('update-submit-btn');
@@ -1296,6 +1719,7 @@ export const App = {
       const result = await DataService.updateProgress({
         site: siteName,
         progressValue: progressValue,
+        progressValues: progressValues,
         note: note,
         username: Auth.getUsername(),
       });
@@ -1304,7 +1728,13 @@ export const App = {
         // Update local data
         const siteIndex = this.sites.findIndex((s) => s['Site'] === siteName);
         if (siteIndex >= 0) {
-          this.sites[siteIndex][progressField] = progressValue;
+          // Ghi lại mọi cột tiến độ vừa gửi (dự án 1 cột thì đúng bằng cột đó)
+          Object.keys(progressValues).forEach(f => {
+            this.sites[siteIndex][f] = progressValues[f];
+            if (this.currentDetailSite && this.currentDetailSite['Site'] === siteName) {
+              this.currentDetailSite[f] = progressValues[f];
+            }
+          });
           if (result.updatedNote !== undefined) {
             this.sites[siteIndex]['Ghi chú (TKTU ONSITE)'] = result.updatedNote;
             if (this.currentDetailSite && this.currentDetailSite['Site'] === siteName) {
@@ -1328,6 +1758,8 @@ export const App = {
           if (historyEl && this.sites[siteIndex]['Ghi chú (TKTU ONSITE)']) {
             historyEl.textContent = this.sites[siteIndex]['Ghi chú (TKTU ONSITE)'];
             historyEl.style.display = 'block';
+            const lbl = document.getElementById('update-note-history-label');
+            if (lbl) lbl.style.display = '';
             setTimeout(() => historyEl.scrollTop = historyEl.scrollHeight, 10);
           }
           this.sites[siteIndex]['User cập nhật'] = Auth.getUsername();
@@ -1335,7 +1767,9 @@ export const App = {
           this.sites[siteIndex]['Ngày cập nhật'] = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth()+1).padStart(2, '0')}/${now.getFullYear()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
 
           // Status ưu tiên giá trị backend trả về; offline thì tính bằng hàm dùng chung.
-          const trangThai = result.status || DataService.computeStatus(progressValue);
+          // Offline: tính từ cả trạm (đã gán giá trị mới ở trên) để dự án nhiều cột
+          // tiến độ / có statusRules không bị kết luận sai từ 1 cột đơn lẻ
+          const trangThai = result.status || DataService.computeSiteStatus(this.sites[siteIndex]);
           this.sites[siteIndex]['Status'] = trangThai;
           this.sites[siteIndex]['status'] = trangThai;
           if (this.currentDetailSite && this.currentDetailSite['Site'] === siteName) {
@@ -1395,15 +1829,16 @@ export const App = {
         await DataService.syncPendingUpdates();
       }
 
+      // Song song với trạm, xem ghi chú trong loadProjectData()
+      const sectorsPromise = DataService.fetchSectors();
       this.sites = await DataService.fetchSites();
-      
+
       if (!['view_limited', 'doitac'].includes(Auth.getRole())) {
         MapManager.loadSites(this.sites);
         this.updateStats();
-        // Reload sectors
-        DataService.fetchSectors().then(sectors => MapManager.loadSectors(sectors));
+        sectorsPromise.then(sectors => MapManager.loadSectors(sectors));
       } else {
-        DataService.fetchSectors().then(sectors => MapManager.setSectorData(sectors));
+        sectorsPromise.then(sectors => MapManager.setSectorData(sectors));
       }
 
       this.showToast('Đã cập nhật dữ liệu', 'success');
@@ -1567,8 +2002,16 @@ export const App = {
     this.currentListTitle = title;
     
     let filtered = [];
-    // Thẻ đếm theo đúng một giá trị của cột tiến độ (vd Newsite: 'Chưa thuê', 'Phát sóng')
-    if (String(filterId).startsWith('progress:')) {
+    // Thẻ đếm theo đúng một giá trị của MỘT cột — 'value:<cột>:<giá trị>' (Dashboard
+    // gửi kèm luôn tên cột vì mỗi thẻ có thể đếm trên cột khác nhau).
+    if (String(filterId).startsWith('value:')) {
+      const [, rawField, rawValue] = String(filterId).split(':');
+      const field = decodeURIComponent(rawField || '');
+      const want = decodeURIComponent(rawValue || '').trim().toLowerCase();
+      filtered = this.sites.filter(s => String(s[field] || '').trim().toLowerCase() === want);
+    }
+    // Dạng cũ 'progress:<giá trị>' — luôn đếm trên cột tiến độ
+    else if (String(filterId).startsWith('progress:')) {
       const want = decodeURIComponent(String(filterId).slice('progress:'.length)).trim().toLowerCase();
       const field = Projects.progressField();
       filtered = this.sites.filter(s => String(s[field] || '').trim().toLowerCase() === want);
@@ -2160,6 +2603,58 @@ export const App = {
   // ============================================================
   // Diagrams (Google Drive auto-lookup)
   // ============================================================
+  /**
+   * Nạp ảnh Drive vào thẻ <img> — NGUỒN DUY NHẤT cho sơ đồ đấu nối, ảnh check-in
+   * và modal zoom.
+   *
+   * Ảnh lấy qua endpoint thumbnail KHÔNG chính thức của Google
+   * (lh3.googleusercontent.com). Endpoint này không những hay lỗi, mà nhiều lúc còn
+   * **treo lơ lửng** — không trả ảnh, cũng không báo lỗi. Khi treo thì sự kiện
+   * `error` KHÔNG BAO GIỜ chạy, nên nếu chỉ nghe `error` thì đường lui không bao
+   * giờ được kích hoạt và ô ảnh cứ trống mãi (đúng lỗi đang gặp).
+   *
+   * Vì vậy phải có cả hạn giờ: quá `timeoutMs` mà ảnh chưa xong thì bỏ endpoint đó,
+   * quay sang đọc bytes thật qua backend (`getFileImage`) — chậm hơn nhưng đáng tin.
+   * Backend cũng chịu thua thì mới gọi `onGiveUp` để bên gọi hiện icon thay thế.
+   *
+   * @param {HTMLImageElement} imgEl
+   * @param {string} fileId    ID file trên Drive
+   * @param {Object} [opts]    { width, timeoutMs, onGiveUp }
+   */
+  loadDriveImage(imgEl, fileId, opts) {
+    if (!imgEl || !fileId) return;
+    opts = opts || {};
+    const timeoutMs = opts.timeoutMs || 6000;
+    const onGiveUp = opts.onGiveUp;
+    let settled = false;
+
+    const fallbackToBackend = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      DataService.getFileImage(fileId)
+        .then(res => {
+          if (res && res.success && res.dataUrl) imgEl.src = res.dataUrl;
+          else if (onGiveUp) onGiveUp();
+        })
+        .catch(() => { if (onGiveUp) onGiveUp(); });
+    };
+
+    const timer = setTimeout(fallbackToBackend, timeoutMs);
+
+    imgEl.addEventListener('load', () => {
+      if (settled) return;
+      // Ảnh "load xong" nhưng rỗng 0x0 cũng coi như hỏng
+      if (!imgEl.naturalWidth) return fallbackToBackend();
+      settled = true;
+      clearTimeout(timer);
+    });
+    imgEl.addEventListener('error', fallbackToBackend);
+
+    const w = opts.width ? `=w${opts.width}` : '';
+    imgEl.src = `https://lh3.googleusercontent.com/d/${fileId}${w}`;
+  },
+
     loadCheckinImage(site) {
     const container = document.getElementById('checkin-media-content');
     if (!container) return;
@@ -2187,33 +2682,26 @@ export const App = {
     else if (m3) fileId = m3[1];
 
     if (fileId) {
-      const thumbUrl = `https://lh3.googleusercontent.com/d/${fileId}=w400`;
+      // src để trống, loadDriveImage() sẽ tự gán và lo cả trường hợp lỗi/treo
       container.innerHTML = `<div class="diagram-grid">
         <div class="diagram-item" id="checkin-image-item">
-          <img id="checkin-image-thumb" src="${thumbUrl}" alt="Ảnh Check-in" loading="lazy">
+          <img id="checkin-image-thumb" alt="Ảnh Check-in">
           <div class="diagram-name">Ảnh Check-in</div>
         </div>
       </div>`;
 
       const itemEl = document.getElementById('checkin-image-item');
       const imgEl = document.getElementById('checkin-image-thumb');
-      // Cả item lẫn ảnh đều mở modal zoom lớn khi bấm (modal đó tự fallback sang backend nếu ảnh lỗi)
+      // Cả item lẫn ảnh đều mở modal zoom lớn khi bấm
       if (itemEl) itemEl.addEventListener('click', () => this.openDiagramViewer(fileId, 'image'));
-      // Ảnh check-in (file mới tạo bằng Apps Script) thường không load được qua endpoint thumbnail
-      // không chính thức (lh3.googleusercontent.com). Fallback: đọc bytes thật qua backend (đáng tin
-      // cậy) rồi gán lại làm data URL — vẫn là <img> thật, không dùng iframe (nuốt click, kẹt UI Drive).
-      if (imgEl) imgEl.addEventListener('error', () => {
-        DataService.getFileImage(fileId).then(res => {
-          if (res.success && res.dataUrl) {
-            imgEl.src = res.dataUrl;
-          } else {
-            imgEl.replaceWith(Object.assign(document.createElement('div'), {
-              style: 'width:100%;height:100px;display:flex;align-items:center;justify-content:center;font-size:28px;background:rgba(255,255,255,0.05);',
-              textContent: '📷'
-            }));
-          }
-        });
-      }, { once: true });
+
+      this.loadDriveImage(imgEl, fileId, {
+        width: 400,
+        onGiveUp: () => imgEl.replaceWith(Object.assign(document.createElement('div'), {
+          style: 'width:100%;height:100px;display:flex;align-items:center;justify-content:center;font-size:28px;background:rgba(255,255,255,0.05);',
+          textContent: '📷'
+        }))
+      });
     } else {
       container.innerHTML = `<div style="padding:12px;text-align:center;"><a href="${imageUrl}" target="_blank" style="color:var(--color-blue);text-decoration:none;">Xem ảnh Check-in</a></div>`;
     }
@@ -2281,16 +2769,17 @@ export const App = {
         if (itemEl) itemEl.addEventListener('click', () => this.openDiagramViewer(diag.id, isImage ? 'image' : (isPDF ? 'pdf' : 'other')));
 
         if (isImage) {
-          const thumbUrl = `https://lh3.googleusercontent.com/d/${diag.id}=w400`;
           const imgEl = document.getElementById(`diagram-thumb-${idx}`);
           if (!imgEl) return;
-          imgEl.addEventListener('error', () => {
-            imgEl.replaceWith(Object.assign(document.createElement('div'), {
+          // Trước đây thumbnail lỗi là bỏ luôn, chỉ hiện icon — dù backend đọc được
+          // file. Giờ thử qua backend trước khi chịu thua, giống ảnh check-in.
+          this.loadDriveImage(imgEl, diag.id, {
+            width: 400,
+            onGiveUp: () => imgEl.replaceWith(Object.assign(document.createElement('div'), {
               className: 'diagram-file-icon',
               textContent: '🖼️'
-            }));
-          }, { once: true });
-          imgEl.src = thumbUrl;
+            }))
+          });
         }
       });
     } catch (error) {
@@ -2300,7 +2789,6 @@ export const App = {
 
   openDiagramViewer(fileId, type) {
     const previewUrl = `https://drive.google.com/file/d/${fileId}/preview`;
-    const directUrl = `https://lh3.googleusercontent.com/d/${fileId}`;
 
     // Create fullscreen overlay
     const overlay = document.createElement('div');
@@ -2312,7 +2800,7 @@ export const App = {
       </div>
       <div class="diagram-viewer-content" id="diagram-viewer-content" style="overflow: hidden; display: flex; align-items: center; justify-content: center; height: 90vh;">
         ${type === 'image'
-          ? `<img id="diagram-zoom-img" src="${directUrl}" alt="Sơ đồ đấu nối" style="max-width:100%;max-height:100%;object-fit:contain;">`
+          ? `<img id="diagram-zoom-img" alt="Sơ đồ đấu nối" style="max-width:100%;max-height:100%;object-fit:contain;">`
           : `<iframe src="${previewUrl}" style="width:100%;height:100%;border:none;border-radius:8px;"></iframe>`
         }
       </div>
@@ -2331,20 +2819,15 @@ export const App = {
         const img = document.getElementById('diagram-zoom-img');
         const content = document.getElementById('diagram-viewer-content');
         if (img && content) {
-          // Nếu ảnh trực tiếp (endpoint không chính thức lh3.googleusercontent.com) lỗi
-          // (rất hay gặp với ảnh check-in mới tạo), đọc bytes thật qua backend (đáng tin cậy)
-          // rồi gán lại src — vẫn là <img> thật nên Panzoom hoạt động y hệt trường hợp bình thường.
-          // Chỉ dùng iframe /preview làm phương án cuối nếu backend cũng không đọc được.
-          img.onerror = () => {
-            img.onerror = null;
-            DataService.getFileImage(fileId).then(res => {
-              if (res.success && res.dataUrl) {
-                img.src = res.dataUrl;
-              } else {
-                content.innerHTML = `<iframe src="${previewUrl}" style="width:100%;height:100%;border:none;border-radius:8px;"></iframe>`;
-              }
-            });
-          };
+          // Endpoint thumbnail không chính thức có thể lỗi HOẶC treo — loadDriveImage()
+          // lo cả hai, tự quay sang đọc bytes qua backend. Vẫn là <img> thật nên Panzoom
+          // hoạt động y hệt. Chỉ dùng iframe /preview khi backend cũng chịu thua.
+          this.loadDriveImage(img, fileId, {
+            timeoutMs: 8000,   // ảnh full-size nặng hơn thumbnail, cho thêm thời gian
+            onGiveUp: () => {
+              content.innerHTML = `<iframe src="${previewUrl}" style="width:100%;height:100%;border:none;border-radius:8px;"></iframe>`;
+            }
+          });
           img.onload = () => {
             if (!window.Panzoom) return;
             // Thư viện chỉ tự bind kéo-để-pan (drag), KHÔNG tự bind wheel/pinch — 2 việc đó

@@ -73,7 +73,7 @@ ________________________________________
 • Swap vendor
 ________________________________________
 9. ĐỊNH DẠNG TRẢ LỜI
-• Trả lời thân thiện, tự nhiên như trò chuyện với đồng nghiệp; vẫn có thể mở đầu bằng kết luận/khuyến nghị trước rồi mới giải thích chi tiết.
+• Trả lời thân thiện, ngắn gọn, dễ hiểu, tự nhiên như trò chuyện với đồng nghiệp; vẫn có thể mở đầu bằng kết luận/khuyến nghị trước rồi mới giải thích chi tiết.
 • Dùng bullet hoặc bảng khi cần so sánh nhiều tham số/giá trị/lỗi, không lạm dụng định dạng khi câu trả lời đơn giản.
 • Tên object/tham số Nokia và ZTE viết chính xác, dùng code style để dễ tra trên hệ thống quản lý.
 • Sẵn sàng hỏi lại nếu câu hỏi chưa rõ, nhưng không hỏi dồn nhiều câu một lúc – ưu tiên trả lời được phần nào trước, hỏi thêm phần còn thiếu.
@@ -149,21 +149,29 @@ Không đoán bừa khi thiếu sự cố – nêu rõ cần thêm thông tin g�
     }
 
     this.loadHistory();
-    this.fetchKnowledgeBase();
+
+    // Kho tài liệu KHÔNG tải lúc mở app: lần đọc đầu ở backend phải OCR file PDF/ảnh,
+    // mất hàng chục giây và làm mọi phiên đăng nhập đều dính lỗi timeout dù người dùng
+    // không hề định hỏi AI. Dùng ngay bản đã lưu, chỉ gọi server khi mở khung chat.
+    const cachedText = localStorage.getItem('bts_ai_knowledge_text');
+    if (cachedText) {
+      this.systemInstruction = this.baseSystemInstruction + "\n\nDỮ LIỆU KỸ THUẬT TỪ HỆ THỐNG:\n" + cachedText;
+    }
   },
 
   async fetchKnowledgeBase() {
     try {
-      console.log('fetchKnowledgeBase START');
       const nm = document.getElementById("ai-name-text");
       const result = await window.DataService.getAIKnowledge();
-      console.log('fetchKnowledgeBase RESULT:', result);
-      
+
       if (!result) return;
 
       if (!result.success) {
-        window.App.showToast("Lỗi API getAIKnowledge: " + JSON.stringify(result).substring(0,100), "error");
-        // Fallback to cached knowledge if API fails
+        // Không toast lỗi: AI vẫn trả lời được bằng kho tài liệu đã lưu, và lần đọc
+        // sau (backend đã cache xong) sẽ tự có bản mới. Báo đỏ ở tên trợ lý là đủ để
+        // biết đang chạy bằng dữ liệu cũ, không cần chặn người dùng bằng thông báo.
+        console.warn('[AI] Không nạp được kho tài liệu:', result.error);
+        if (nm) nm.style.color = "#f59e0b";
         const cachedText = localStorage.getItem('bts_ai_knowledge_text');
         if (cachedText) {
           this.systemInstruction = this.baseSystemInstruction + "\n\nDỮ LIỆU KỸ THUẬT TỪ HỆ THỐNG:\n" + cachedText;
@@ -212,6 +220,11 @@ Không đoán bừa khi thiếu sự cố – nêu rõ cần thêm thông tin g�
 
   openChat() {
     this.modal.classList.add('visible');
+    // Nạp kho tài liệu 1 lần cho mỗi phiên, ngay lúc người dùng thật sự cần đến AI.
+    if (!this._knowledgeRequested) {
+      this._knowledgeRequested = true;
+      this.fetchKnowledgeBase();
+    }
   },
   closeChat() {
     this.modal.classList.remove('visible');

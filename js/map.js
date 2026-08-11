@@ -2,9 +2,37 @@ import { AppConfig } from './config.js';
 import { Storage } from './storage.js';
 import { Auth } from './auth.js';
 import { DataService } from './data.js';
+import { Projects } from './projects.js';
 /**
  * NetDep - Map Module (Leaflet.js)
  */
+
+// Khoá riêng của dropdown "Trạng thái" — không phải tên cột nào trong sheet, nên đặt
+// tiền tố __ để không đụng cột thật khi lọc trong matchesFilters().
+const STATUS_FILTER_KEY = '__status';
+
+// 3 mức trạng thái dùng chung mọi dự án, đúng bộ màu marker trong chú thích bản đồ.
+const STATUS_FILTER_OPTIONS = [
+  { value: 'completed', label: '🟢 Hoàn thành' },
+  { value: 'in_progress', label: '🔴 Đang thực hiện' },
+  { value: 'not_started', label: '⚪ Chưa thực hiện' }
+];
+
+/**
+ * Quy trạng thái của trạm về đúng 3 mức trên.
+ * getSiteStatus() còn trả 'trien_khai'/'du_phong' (giá trị cột 'Danh sách' của riêng
+ * dự án 5G) — với bộ lọc thì cả hai đều là "chưa chạy xong", gom vào 'not_started'.
+ */
+function statusBucket(site) {
+  const s = DataService.getSiteStatus(site);
+  if (s === 'completed' || s === 'in_progress') return s;
+  return 'not_started';
+}
+
+const escapeHtml = (s) => String(s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const escapeAttr = (s) => escapeHtml(s).replace(/"/g, '&quot;');
+
 export const MapManager = {
   map: null,
   markers: {},
@@ -13,6 +41,8 @@ export const MapManager = {
   sectorsVisible: true,
   sectorData: [],
   filterDistrict: '',
+  // { tên cột thật (hoặc '__status') : giá trị đang chọn } — dựng theo dự án đang xem
+  filterValues: {},
   userMarker: null,
   userCircle: null,
   currentTileLayer: 'satellite',
@@ -34,7 +64,12 @@ export const MapManager = {
     const center = savedState ? savedState.center : AppConfig.MAP_CENTER;
     const zoom = savedState ? savedState.zoom : AppConfig.MAP_ZOOM;
 
-    this.applyTileSeamFix();
+    // ⚠️ ĐỪNG thêm lại "fix khe hở tile" bằng cách nới kích thước tile (256 → 256.5px
+    // hay +1 điểm ảnh vật lý). Đã đo bằng ảnh chụp A/B trên cùng một khung hình:
+    // kéo giãn tile CHÍNH LÀ thứ tạo ra vạch kẻ — ảnh 256px bị nội suy lên kích thước
+    // lẻ nên mỗi tile có một viền mờ, tile trên đè viền đó lên tile bên cạnh thành
+    // đường kẻ sáng. Để nguyên 256px thì bản đồ sạch (kiểm tra ở devicePixelRatio 1.25).
+    // Phòng hờ cho khe thật: nền khung bản đồ để tối trong style.css.
 
     this.map = L.map('map', {
       preferCanvas: true,
@@ -127,39 +162,6 @@ export const MapManager = {
     
   },
 
-  /**
-   * Bật fix khe hở giữa các ô ảnh bản đồ — chỉ khi tỉ lệ hiển thị lẻ.
-   *
-   * Ở tỉ lệ 100% (devicePixelRatio nguyên) các tile khớp nhau chính xác, KHÔNG được
-   * nới thêm: kéo 256 → 256.5px buộc trình duyệt nội suy lại ảnh và tự sinh vạch sáng
-   * ở mép, tức là tạo ra đúng lỗi đang muốn sửa (đã kiểm chứng bằng ảnh chụp A/B).
-   * Chỉ ở tỉ lệ lẻ (125%, 150%...) mới có khe thật cần lấp.
-   *
-   * Người dùng đổi tỉ lệ zoom trình duyệt giữa chừng → devicePixelRatio đổi theo, nên
-   * theo dõi bằng matchMedia để bật/tắt lại cho đúng.
-   */
-  applyTileSeamFix() {
-    const update = () => {
-      const dpr = window.devicePixelRatio || 1;
-      const fractional = Math.abs(dpr - Math.round(dpr)) > 0.001;
-      document.body.classList.toggle('tile-seam-fix', fractional);
-    };
-    update();
-
-    if (!this._dprWatcher && window.matchMedia) {
-      // Không có sự kiện riêng cho devicePixelRatio; mẹo chuẩn là nghe media query
-      // gắn với đúng giá trị dpr hiện tại — nó ngừng khớp ngay khi dpr đổi.
-      const watch = () => {
-        const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
-        const onChange = () => { update(); watch(); };
-        if (mq.addEventListener) mq.addEventListener('change', onChange, { once: true });
-        else if (mq.addListener) mq.addListener(onChange);
-      };
-      watch();
-      this._dprWatcher = true;
-    }
-  },
-
   // ============================================================
   // Toggle Map Layer
   // ============================================================
@@ -237,6 +239,8 @@ export const MapManager = {
     this.allSites = sites || [];
     if (!sites || sites.length === 0) return;
     this.populateDistrictFilter(this.allSites);
+    this.buildFilterControls(this.allSites);
+    this.refreshLegend();
     this.applyFilters();
   },
 
@@ -260,18 +264,7 @@ export const MapManager = {
 
       if (!lat || !lng || isNaN(lat) || isNaN(lng)) continue;
 
-      if (this.filterDistrict && String(site['Tỉnh mới'] || '').trim() !== this.filterDistrict) continue;
-      
-      if (this.filterStatus) {
-        const isDailyPlan = DataService.isDailyPlan(site);
-        if (this.filterStatus === 'daily_plan' && !isDailyPlan) continue;
-        if (this.filterStatus !== 'daily_plan') {
-          // Use 'Danh sách' column so completed sites still appear
-          const danhSach = String(site['Danh sách'] || '').trim().toLowerCase();
-          if (this.filterStatus === 'trien_khai' && danhSach !== 'triển khai') continue;
-          if (this.filterStatus === 'du_phong' && danhSach !== 'dự phòng') continue;
-        }
-      }
+      if (!this.matchesFilters(site)) continue;
 
       if (!bounds.contains([lat, lng])) continue;
 
@@ -335,6 +328,89 @@ export const MapManager = {
     if (currentVal) select.value = currentVal;
   },
 
+  /**
+   * Dựng các dropdown lọc theo `mapFilters` của dự án đang xem.
+   *
+   * Lựa chọn trong mỗi dropdown lấy từ CHÍNH giá trị đang có trong cột đó, không ghi
+   * cứng: sheet thêm giá trị mới là bộ lọc tự có, và dự án không có cột đó thì dropdown
+   * không hiện (trước đây mọi dự án đều thấy 'Triển khai/Dự phòng' của riêng 5G).
+   *
+   * Riêng 'Status' lọc theo Trạng thái TÍNH ĐƯỢC (DataService.getSiteStatus) chứ không
+   * theo cột trong sheet, để bộ lọc luôn khớp màu marker và số liệu Dashboard.
+   */
+  buildFilterControls(sites) {
+    const bar = document.getElementById('map-filter-bar');
+    if (!bar) return;
+
+    // Giữ lại lựa chọn cũ khi đổi tỉnh/tải lại dữ liệu, bỏ lựa chọn của cột không còn nữa
+    const previous = Object.assign({}, this.filterValues);
+    bar.querySelectorAll('.js-dyn-filter').forEach(el => el.remove());
+    this.filterValues = {};
+
+    Projects.mapFilters().forEach(name => {
+      const spec = (String(name).toLowerCase() === 'status')
+        ? { key: STATUS_FILTER_KEY, label: 'Trạng thái', options: STATUS_FILTER_OPTIONS }
+        : this.valueFilterSpec(sites, name);
+      if (!spec || !spec.options.length) return;
+
+      const select = document.createElement('select');
+      select.className = 'map-filter-select js-dyn-filter';
+      select.dataset.field = spec.key;
+      select.innerHTML = [`<option value="">📍 Tất cả ${spec.label}</option>`]
+        .concat(spec.options.map(o => `<option value="${escapeAttr(o.value)}">${escapeHtml(o.label)}</option>`))
+        .join('');
+
+      const keep = previous[spec.key];
+      if (keep && spec.options.some(o => o.value === keep)) select.value = keep;
+      this.filterValues[spec.key] = select.value;
+
+      select.addEventListener('change', () => this.applyFilters());
+      bar.appendChild(select);
+    });
+  },
+
+  /** Dropdown lọc theo giá trị thật của 1 cột; null nếu dự án không có cột đó. */
+  valueFilterSpec(sites, name) {
+    const key = Projects.resolveField(sites, name);
+    if (!key) return null;
+
+    const values = new Set();
+    sites.forEach(s => {
+      const v = String(s[key] || '').trim();
+      if (v) values.add(v);
+    });
+
+    // Chỉ liệt kê giá trị ĐANG CÓ trong cột: chọn một mốc chưa trạm nào đạt tới thì
+    // bản đồ trống trơn, người dùng không biết là lọc đúng hay dữ liệu hỏng.
+    return {
+      key,
+      label: name,
+      options: [...values]
+        .sort((a, b) => a.localeCompare(b, 'vi'))
+        .map(v => ({ value: v, label: v }))
+    };
+  },
+
+  /** Trạm có qua hết bộ lọc đang chọn không (dùng chung cho marker và sector). */
+  matchesFilters(site) {
+    if (!site) return false;
+    if (this.filterDistrict && String(site['Tỉnh mới'] || '').trim() !== this.filterDistrict) return false;
+
+    const keys = Object.keys(this.filterValues || {});
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      const want = this.filterValues[key];
+      if (!want) continue;
+
+      if (key === STATUS_FILTER_KEY) {
+        if (statusBucket(site) !== want) return false;
+      } else if (String(site[key] || '').trim() !== want) {
+        return false;
+      }
+    }
+    return true;
+  },
+
   toggleFilterBar() {
     const bar = document.getElementById('map-filter-bar');
     if (bar) bar.classList.toggle('active');
@@ -342,7 +418,9 @@ export const MapManager = {
 
   applyFilters() {
     this.filterDistrict = document.getElementById('filter-district')?.value || '';
-    this.filterStatus = document.getElementById('filter-status')?.value || '';
+    document.querySelectorAll('#map-filter-bar .js-dyn-filter').forEach(sel => {
+      this.filterValues[sel.dataset.field] = sel.value;
+    });
     if (this.markerClusterIndex) {
       this.updateMarkerClusterIndex();
     } else {
@@ -362,17 +440,15 @@ export const MapManager = {
     if (site) {
       // Always reset to show all when searching a site
       const filterDistrict = document.getElementById('filter-district');
-      const filterStatus = document.getElementById('filter-status');
-      
       if (filterDistrict && filterDistrict.value !== '') {
         filterDistrict.value = '';
         this.filterDistrict = '';
       }
-      if (filterStatus && filterStatus.value !== '') {
-        filterStatus.value = '';
-        this.filterStatus = '';
-      }
-      
+      document.querySelectorAll('#map-filter-bar .js-dyn-filter').forEach(sel => {
+        sel.value = '';
+        this.filterValues[sel.dataset.field] = '';
+      });
+
       this.renderVisibleSites();
       
       const lat = parseFloat(site['Lat']);
@@ -579,25 +655,77 @@ export const MapManager = {
   // ============================================================
   // Legend
   // ============================================================
+  legendControl: null,
+
   addLegend() {
     const legend = L.control({ position: 'bottomleft' });
-
-    legend.onAdd = function () {
+    legend.onAdd = () => {
       const div = L.DomUtil.create('div', 'map-legend');
-      div.innerHTML = `
-        <div class="legend-title">Chú thích</div>
-        <div class="legend-item"><span class="legend-dot" style="background:${AppConfig.COLORS.TRIEN_KHAI}"></span> Triển khai</div>
-        <div class="legend-item"><span class="legend-dot" style="background:${AppConfig.COLORS.DU_PHONG}"></span> Dự phòng</div>
-        <div class="legend-item"><span class="legend-dot" style="background:#16a34a"></span> Hoàn thành</div>
-        <div class="legend-item"><span class="legend-dot" style="background:#dc2626"></span> Đang thực hiện</div>
+      div.innerHTML = this.legendHTML();
+      return div;
+    };
+    legend.addTo(this.map);
+    this.legendControl = legend;
+  },
+
+  /** Vẽ lại chú thích khi đổi dự án / tải xong dữ liệu (mốc tiến độ khác nhau). */
+  refreshLegend() {
+    const el = this.legendControl && this.legendControl.getContainer();
+    if (el) el.innerHTML = this.legendHTML();
+  },
+
+  /**
+   * Chú thích màu marker.
+   *
+   * Dự án chỉ có MỘT cột tiến độ thì liệt kê thẳng các mốc của cột đó (Newsite:
+   * Chưa thuê → Phát sóng) — đúng thứ ngôn ngữ người dùng nhìn thấy trong sheet và
+   * trong dropdown cập nhật, thay vì 3 chữ 'Hoàn thành/Đang thực hiện' chung chung.
+   * Chỉ lấy mốc ĐANG CÓ trong dữ liệu, xếp theo thứ tự khai trong registry.
+   *
+   * Nhiều cột tiến độ (Swap: 4G + 5G) thì màu marker là kết luận của cả hai cột, không
+   * quy được về giá trị của riêng cột nào — giữ 3 mức trạng thái chung.
+   */
+  legendHTML() {
+    const sectorRows = `
         <div style="border-top:1px solid rgba(255,255,255,0.15);margin:4px 0;"></div>
         <div class="legend-item"><span class="legend-dot" style="background:#00C853"></span> Sector 5G</div>
         <div class="legend-item"><span class="legend-dot" style="background:#FFD600"></span> Sector 4G</div>
-      `;
-      return div;
-    };
+        <div class="legend-item"><span class="legend-dot" style="background:#FF1744"></span> Sector 4G700</div>`;
 
-    legend.addTo(this.map);
+    const row = (color, text) =>
+      `<div class="legend-item"><span class="legend-dot" style="background:${color}"></span> ${escapeHtml(text)}</div>`;
+
+    const values = this.legendProgressValues();
+    const rows = values.length
+      ? values.map(v => row(DataService.progressValueColor(v), v)).join('')
+      : [
+          row(AppConfig.COLORS.DEFAULT, 'Chưa thực hiện'),
+          row('#dc2626', 'Đang thực hiện'),
+          row('#16a34a', 'Hoàn thành')
+        ].join('');
+
+    return `<div class="legend-title">Chú thích</div>${rows}${sectorRows}`;
+  },
+
+  /** Các mốc tiến độ có thật trong dữ liệu, theo thứ tự registry; [] nếu không dùng được. */
+  legendProgressValues() {
+    const fields = Projects.progressFields();
+    if (fields.length !== 1) return [];
+
+    const key = Projects.resolveField(this.allSites, fields[0]);
+    if (!key || !this.allSites.length) return [];
+
+    const present = new Set();
+    this.allSites.forEach(s => {
+      const v = String(s[key] || '').trim();
+      if (v) present.add(v);
+    });
+    if (!present.size) return [];
+
+    const ordered = Projects.progressOptions().filter(v => present.has(v));
+    ordered.forEach(v => present.delete(v));
+    // Giá trị lạ (gõ tay sai chính tả trong sheet) vẫn hiện, kèm màu nó đang được tô
+    return ordered.concat([...present].sort((a, b) => a.localeCompare(b, 'vi')));
   },
 
   // ============================================================
@@ -635,8 +763,12 @@ export const MapManager = {
       tech = String(sectorObj['Sector'] || '').toUpperCase();
     }
 
-    if (tech.includes('5G')) return '5g';
-    if (tech.includes('4G')) return '4g';
+    // Thứ tự kiểm tra quan trọng: '4G700' cũng chứa '4G', nếu xét '4g' trước thì
+    // sector 700 bị gom vào 4G thường và không bao giờ nhận diện được.
+    const norm = tech.replace(/[\s_-]/g, '');
+    if (norm.includes('4G700') || norm.includes('700')) return '4g700';
+    if (norm.includes('5G')) return '5g';
+    if (norm.includes('4G')) return '4g';
     return 'other';
   },
 
@@ -655,18 +787,40 @@ export const MapManager = {
 
   getSectorColor(type) {
     switch (type) {
-      case '5g': return '#00C853'; 
-      case '4g': return '#FF2D78'; 
-      default: return '#FFEE00'; 
+      case '5g': return '#00C853';    // xanh lá
+      case '4g700': return '#FF1744'; // đỏ
+      case '4g': return '#FFD600';    // vàng
+      default: return '#FFEE00';
+    }
+  },
+
+  /**
+   * Hình dạng cánh sector theo công nghệ — NGUỒN DUY NHẤT.
+   * Gom về đây để bản đồ đầy đủ (renderSectors) và bản đồ 1 trạm cho role hạn chế
+   * (loadSectorsForSite) vẽ giống hệt nhau; trước đây mỗi nơi một bộ số nên cùng
+   * một sector 5G lại dài ngắn khác nhau tuỳ màn hình.
+   *
+   * 4G700 phủ xa nhất nên cánh dài hơn cả 5G, và được vẽ trước để nằm dưới cùng
+   * (xem thứ tự sắp xếp trong setSectorData).
+   */
+  getSectorStyle(type) {
+    switch (type) {
+      case '4g700': return { length: 240, beamWidth: 30, fillOpacity: 0.35 };
+      case '5g':    return { length: 171, beamWidth: 24, fillOpacity: 0.55 };
+      case '4g':    return { length: 130, beamWidth: 24, fillOpacity: 0.45 };
+      default:      return { length: 130, beamWidth: 30, fillOpacity: 0.2 };
     }
   },
 
   setSectorData(sectors) {
     const data = sectors || [];
+    // Thứ tự vẽ = thứ tự chồng lớp: vẽ trước nằm dưới. 4G700 có cánh dài nhất nên
+    // vẽ đầu tiên để nằm dưới cùng, thò ra ngoài mà không che 5G/4G bên trên.
     const getOrder = (type) => {
-      if (type === '5g') return 1;
-      if (type === '4g700') return 2;
-      return 3;
+      if (type === '4g700') return 1;
+      if (type === '5g') return 2;
+      if (type === '4g') return 3;
+      return 4;
     };
     data.sort((a, b) => {
       const typeA = this.getSectorType(a);
@@ -701,12 +855,257 @@ export const MapManager = {
   bindSectorPopup(layers, popupHtml, anchor) {
     const openAtAnchor = (e) => {
       L.DomEvent.stopPropagation(e);
-      L.popup({ autoPan: false, maxWidth: 260 })
+      // maxWidth phải đủ cho popup đối chiếu của CSDL: nhãn + số FT + ô nhập hậu kiểm
+      // + cột ảnh. Để 260 như trước thì Leaflet bóp khung trắng lại, cột hậu kiểm bị
+      // cắt mất một nửa và ô nhập tràn ra ngoài viền.
+      L.popup({
+        autoPan: false,
+        maxWidth: Math.min(430, Math.max(260, window.innerWidth - 40)),
+        className: 'sector-popup-wrap'
+      })
         .setLatLng(anchor)
         .setContent(popupHtml)
         .openOn(this.map);
     };
     layers.forEach(layer => layer.on('click', openAtAnchor));
+  },
+
+  /**
+   * Các cột số liệu của sector nằm trong nhóm mà registry chỉ định (`sectorPopup`).
+   *
+   * Sheet CSDL có HAI nhóm cột trùng tên nhau ("Dữ liệu FT kiểm tra" và "Dữ liệu hậu
+   * kiểm": cùng có Azimuth, Tilt cơ, Loại Antenna...). Tra thẳng sector['Azimuth'] thì
+   * không biết mình đang lấy số của nhóm nào — phải chốt theo tiền tố nhóm.
+   *
+   * Trả [] nếu dự án không khai `sectorPopup` (các dự án khác giữ popup như cũ).
+   */
+  sectorGroupRows(sector) {
+    const cfg = Projects.current().sectorPopup;
+    if (!sector || !cfg || !cfg.group) return [];
+
+    const norm = (s) => String(s).toLowerCase().normalize('NFC').replace(/\s+/g, '');
+    const prefix = norm(cfg.group) + '-';
+    const keys = Object.keys(sector).filter(k => norm(k).startsWith(prefix));
+
+    // Khai `fields` thì chỉ lấy đúng những cột đó, theo thứ tự đã khai; không khai thì
+    // lấy mọi cột của nhóm, giữ nguyên thứ tự cột trong sheet.
+    const wanted = Array.isArray(cfg.fields) && cfg.fields.length ? cfg.fields : null;
+    let ordered = wanted
+      ? wanted.map(f => keys.find(k => norm(k) === prefix + norm(f))).filter(Boolean)
+      : keys;
+
+    // `exclude`: bỏ vài cột không cần xem. Dùng danh sách LOẠI TRỪ thay vì bắt khai đủ
+    // danh sách giữ lại — gõ sai một tên thì cột đó vẫn hiện (thừa, nhìn ra ngay), chứ
+    // không âm thầm biến mất như khi dùng danh sách giữ lại.
+    if (Array.isArray(cfg.exclude) && cfg.exclude.length) {
+      const bo = cfg.exclude.map(f => prefix + norm(f));
+      ordered = ordered.filter(k => !bo.includes(norm(k)));
+    }
+
+    // Nhóm đối chiếu (CSDL: "Dữ liệu hậu kiểm"): lấy cột CÙNG TÊN ở nhóm kia để hiện
+    // cạnh số của FT, kèm khoá thật của cột đó để nút ✏️ biết ghi vào đâu.
+    const editPrefix = cfg.editGroup ? norm(cfg.editGroup) + '-' : null;
+    const allKeys = Object.keys(sector);
+
+    return ordered
+      .map(k => {
+        const label = k.slice(cfg.group.length + 3).trim() || k;
+        const row = { key: k, label, value: String(sector[k] ?? '').trim() };
+        if (editPrefix) {
+          const twin = allKeys.find(x => norm(x) === editPrefix + norm(label));
+          if (twin) {
+            row.editKey = twin;
+            row.editValue = String(sector[twin] ?? '').trim();
+          }
+        }
+        return row;
+      })
+      .filter(r => r.value !== '' || r.editValue);
+  },
+
+  /**
+   * Khoá thật của cột lưu ảnh hạng mục trong object sector.
+   *
+   * Tra theo tên chuẩn hoá chứ không tra thẳng sector[cfg.photoColumn]: sheet 2 tầng
+   * tiêu đề có thể sinh ra khoá dạng "<Nhóm> - Ảnh hạng mục" nếu người dùng đặt cột
+   * nằm dưới một ô nhóm nào đó. Trả null nếu sheet chưa có cột.
+   */
+  sectorPhotoKey(sector) {
+    const col = (Projects.current().sectorPopup || {}).photoColumn;
+    if (!sector || !col) return null;
+    const norm = (s) => String(s).toLowerCase().normalize('NFC').replace(/\s+/g, '');
+    const want = norm(col);
+    const keys = Object.keys(sector);
+    return keys.find(k => norm(k) === want)
+        || keys.find(k => norm(k).endsWith('-' + want))
+        || null;
+  },
+
+  /**
+   * Ảnh đã chụp của sector, gom theo hạng mục: { '<hạng mục chuẩn hoá>': [url, ...] }.
+   *
+   * Ô trong sheet là nhiều dòng "Hạng mục | link". Dòng không có dấu '|' (ảnh cũ, hoặc
+   * dán tay) được xếp vào hạng mục rỗng để vẫn xem được chứ không biến mất.
+   */
+  sectorPhotoMap(sector) {
+    const out = {};
+    const key = this.sectorPhotoKey(sector);
+    if (!key) return out;
+
+    const norm = (s) => String(s).toLowerCase().normalize('NFC').replace(/\s+/g, '');
+    String(sector[key] || '').split(/[\n\r]+/).forEach(line => {
+      const raw = line.trim();
+      if (!raw) return;
+      const cut = raw.indexOf('|');
+      const label = cut >= 0 ? raw.slice(0, cut).trim() : '';
+      const url = (cut >= 0 ? raw.slice(cut + 1) : raw).trim();
+      if (!/^https?:\/\//i.test(url)) return;
+      (out[norm(label)] = out[norm(label)] || []).push(url);
+    });
+    return out;
+  },
+
+  /**
+   * Popup sector dạng đối chiếu 2 nhóm: số đo FT (chỉ đọc) cạnh số đo hậu kiểm (sửa
+   * được). FT ra hiện trường bấm ✏️ nhập luôn giá trị mới, khỏi phải mở sheet.
+   */
+  sectorGroupPopupHtml(sector, sectorName, siteName, type, color, rows) {
+    const cfg = Projects.current().sectorPopup || {};
+    const canEdit = Projects.canEdit(Auth.getRole());
+    const hasEditCol = !!cfg.editGroup && rows.some(r => r.editKey);
+    const dash = (v) => (v === undefined || v === null || v === '') ? '-' : escapeHtml(v);
+    const attr = (v) => escapeAttr(String(v ?? ''));
+
+    // Cột ảnh chỉ hiện khi dự án khai `photoColumn`. Người không có quyền sửa vẫn XEM
+    // được ảnh (hậu kiểm mở ra đối chiếu), chỉ không thấy nút thêm ảnh.
+    const hasPhotoCol = !!cfg.photoColumn;
+    const photos = hasPhotoCol ? this.sectorPhotoMap(sector) : {};
+    const normLbl = (s) => String(s).toLowerCase().normalize('NFC').replace(/\s+/g, '');
+
+    // Cột nhãn phải được ưu tiên: tên cột của sheet CSDL khá dài ("Độ cao anten so với
+    // chân cột"), bị bóp là xuống 3-4 dòng và popup cao gấp đôi.
+    // Cột giá trị để `minmax(0, auto)` chứ không phải `auto`: mã antenna kiểu
+    // "APXV18_206516S_C_4G" là một "từ" dài, track `auto` sẽ giãn theo nó và ăn hết
+    // phần của cột nhãn. minmax(0,...) + overflow-wrap cho phép nó tự xuống dòng.
+    // clamp cho cột nhãn: màn hình rộng thì 132px (nhãn dài nhất gọn trong 2 dòng),
+    // điện thoại hẹp thì tự co lại thay vì đẩy cột ảnh tràn ra ngoài khung trắng.
+    const cols = ['minmax(clamp(96px, 26vw, 132px), 1.3fr)', hasEditCol ? 'minmax(0, auto)' : '1fr']
+      .concat(hasEditCol ? ['auto'] : [])
+      .concat(hasPhotoCol ? ['auto'] : [])
+      .join(' ');
+
+    const headCell = (text, align) =>
+      `<span style="color:#64748b;font-size:10px;text-transform:uppercase;text-align:${align};">${escapeHtml(text)}</span>`;
+    const header = (hasEditCol || hasPhotoCol)
+      ? `<span></span>
+         ${headCell(cfg.group, 'right')}
+         ${hasEditCol ? headCell(cfg.editGroup, 'center') : ''}
+         ${hasPhotoCol ? headCell('Ảnh', 'center') : ''}`
+      : '';
+
+    /**
+     * Ô ảnh của một hạng mục: các link ảnh đã có (đánh số 1,2,3...) + nút thêm ảnh.
+     * Tên hạng mục đi qua `data-item` chứ không nhét vào chuỗi onclick — nhãn tiếng
+     * Việt có dấu nháy/ngoặc sẽ làm vỡ chuỗi onclick lồng nhau.
+     */
+    const photoCell = (label) => {
+      if (!hasPhotoCol) return '';
+      const urls = photos[normLbl(label)] || [];
+      const chips = urls.map((u, i) =>
+        `<a href="${attr(u)}" target="_blank" rel="noopener" class="sector-photo-chip"
+            title="${attr(label)} — ảnh ${i + 1}">${i + 1}</a>`).join('');
+      const add = canEdit
+        ? `<button type="button" class="sector-photo-add" data-item="${attr(label)}"
+             title="Chụp / thêm ảnh: ${attr(label)}"
+             onclick="window.App.pickSectorPhoto(this)">＋</button>`
+        : '';
+      return `<span class="sector-photo-cell">${chips}${add}</span>`;
+    };
+
+    // Ô nhập ngay trong popup: FT gõ hết các giá trị rồi bấm LƯU một lần, thay vì mỗi
+    // dòng một hộp thoại. `data-col` giữ đúng tên cột sheet, `data-goc` để so xem ô nào
+    // thật sự đổi — chỉ ghi những ô đã đổi, đỡ đụng vào sheet vô ích.
+    const inputCell = (r) => {
+      if (!r.editKey) return '<span></span>';
+      if (!canEdit) return `<span style="font-weight:600;text-align:right;color:#38bdf8;">${dash(r.editValue)}</span>`;
+      return `<input class="sector-cell-input" type="text"
+                data-col="${attr(r.editKey)}" data-goc="${attr(r.editValue || '')}"
+                value="${attr(r.editValue || '')}"
+                style="width:clamp(56px, 17vw, 88px);padding:4px 6px;font-size:12px;font-weight:600;text-align:right;
+                       color:#ffffff;background:rgba(56,189,248,0.10);
+                       border:1px solid rgba(56,189,248,0.45);
+                       border-radius:5px;outline:none;font-family:inherit;">`;
+    };
+
+    const body = rows.map(r => `
+      <span style="color:#94a3b8;">${escapeHtml(r.label)}</span>
+      <span style="font-weight:600;text-align:right;overflow-wrap:anywhere;">${dash(r.value)}</span>
+      ${hasEditCol ? inputCell(r) : ''}
+      ${photoCell(r.label)}
+    `).join('');
+
+    // Hạng mục CHỈ có ảnh (`photoItems`, vd "Tổng quan cột"): không gắn với cột số đo
+    // nào nên xếp thành khối riêng dưới bảng, ngăn bằng một vạch mảnh cho khỏi lẫn với
+    // các dòng đối chiếu FT ↔ hậu kiểm ở trên.
+    const extraItems = (hasPhotoCol && Array.isArray(cfg.photoItems)) ? cfg.photoItems : [];
+    const colSpan = 2 + (hasEditCol ? 1 : 0) + (hasPhotoCol ? 1 : 0);
+    const extraBlock = extraItems.length ? `
+      <div style="grid-column:1/-1;height:1px;background:rgba(148,163,184,0.25);margin:4px 0 2px;"></div>
+      <span style="grid-column:1/-1;color:#64748b;font-size:10px;text-transform:uppercase;">Ảnh hạng mục khác</span>
+      ${extraItems.map(item => `
+        <span style="color:#94a3b8;grid-column:span ${colSpan - 1};">${escapeHtml(item)}</span>
+        ${photoCell(item)}
+      `).join('')}` : '';
+
+    const saveBtn = (hasEditCol && canEdit) ? `
+      <button type="button"
+        onclick="window.App.saveSectorCells('${attr(siteName)}', '${attr(sectorName)}', this)"
+        style="margin-top:10px;width:100%;padding:7px 10px;font-size:12px;font-weight:700;
+               color:#fff;background:#16a34a;border:none;border-radius:6px;cursor:pointer;
+               font-family:inherit;">💾 LƯU</button>` : '';
+
+    // Leaflet co khung popup vừa khít nội dung, nên min-width ở đây mới là thứ quyết
+    // định bề rộng khung trắng. Cộng đúng bề rộng mong muốn của từng cột đang hiện
+    // (nhãn + số FT + ô nhập hậu kiểm + ảnh) cộng khoảng cách 8px giữa các cột — thiếu
+    // là lưới tự bóp cột số liệu xuống ~50px và mọi giá trị đều xuống dòng.
+    // Chặn trên theo bề rộng màn hình để trên điện thoại popup không tràn ra ngoài;
+    // hẹp quá thì `.sector-popup` cuộn ngang trong khung trắng (xem style.css).
+    const idealW = 132
+      + (hasEditCol ? 8 + 104 + 8 + 88 : 8 + 120)
+      + (hasPhotoCol ? 8 + 74 : 0);
+    const minW = Math.min(idealW, Math.max(220, window.innerWidth - 56));
+
+    // data-site/data-sector cho các nút trong popup biết mình thuộc sector nào mà không
+    // phải nhét chuỗi tên trạm vào từng onclick.
+    return `
+      <div class="sector-popup" data-site="${attr(siteName)}" data-sector="${attr(sectorName)}"
+           style="font-family:'Inter',sans-serif;font-size:12px;min-width:${minW}px;">
+        <div style="font-weight:700;font-size:13px;margin-bottom:6px;color:${color};">${escapeHtml(sectorName)}</div>
+        <div style="display:grid;grid-template-columns:${cols};gap:5px 8px;align-items:center;">
+          ${header}
+          <span style="color:#94a3b8;">Tech</span>
+          <span style="font-weight:700;color:${color};text-align:right;">${type.toUpperCase()}</span>
+          ${hasEditCol ? '<span></span>' : ''}
+          ${hasPhotoCol ? '<span></span>' : ''}
+          ${body}
+          ${extraBlock}
+        </div>
+        ${saveBtn}
+      </div>
+    `;
+  },
+
+  /** Góc azimuth để vẽ cánh sector — ưu tiên cột trong nhóm mà registry chỉ định. */
+  sectorAzimuth(sector) {
+    if (!sector) return 0;
+    const cfg = Projects.current().sectorPopup;
+    if (cfg && cfg.group) {
+      const norm = (s) => String(s).toLowerCase().normalize('NFC').replace(/\s+/g, '');
+      const want = norm(cfg.group) + '-' + norm(cfg.azimuthField || 'Azimuth');
+      const key = Object.keys(sector).find(k => norm(k) === want);
+      if (key) return parseFloat(sector[key]) || 0;
+    }
+    return parseFloat(sector['Azimuth']) || 0;
   },
 
   renderSectors() {
@@ -730,66 +1129,30 @@ export const MapManager = {
       if (count >= maxSectors) break;
       const sector = this.sectorData[i];
 
-      if (this.filterDistrict) {
-        const siteName = String(sector['Site'] || sector['Mã trạm'] || sector['Mã Trạm'] || '').trim();
-        const siteObj = siteMap.get(siteName) || null;
-        if (siteObj && String(siteObj['Tỉnh mới'] || '').trim() !== this.filterDistrict) continue;
-      }
-
-      if (this.filterStatus) {
-        const siteName = String(sector['Site'] || sector['Mã trạm'] || sector['Mã Trạm'] || '').trim();
-        if (siteName) {
-          // Look up site by name in allSites
-          const siteObj = siteMap.get(siteName);
-          if (siteObj) {
-            const isDailyPlan = DataService.isDailyPlan(siteObj);
-            if (this.filterStatus === 'daily_plan') {
-              if (!isDailyPlan) continue;
-            } else {
-              // Use 'Danh sách' column so completed sites' sectors still show
-              const danhSach = String(siteObj['Danh sách'] || '').trim().toLowerCase();
-              if (this.filterStatus === 'trien_khai' && danhSach !== 'triển khai') continue;
-              if (this.filterStatus === 'du_phong' && danhSach !== 'dự phòng') continue;
-            }
-          }
-          // If siteObj not found, still render the sector (don't skip)
-        }
-      }
       const siteName = String(sector['Site'] || sector['Mã trạm'] || sector['Mã Trạm'] || '').trim();
+
+      // Sector đi theo trạm của nó: trạm bị lọc thì cánh sector cũng phải biến mất.
+      // Không tra được trạm (sector của dự án khác / sai tên) thì vẫn vẽ, như trước.
+      const siteObj = siteMap.get(siteName) || null;
+      if (siteObj && !this.matchesFilters(siteObj)) continue;
 
 
       const lat = parseFloat(sector['Lat']);
       const lng = parseFloat(sector['Long']);
-      const azimuth = parseFloat(sector['Azimuth']) || 0;
-      
+      const azimuth = this.sectorAzimuth(sector);
+
       if (!lat || !lng || isNaN(lat) || isNaN(lng)) continue;
       if (!bounds.contains([lat, lng])) continue;
 
       const type = this.getSectorType(sector);
       if (type === 'other') continue;
 
-      let color = this.getSectorColor(type);
-      let fOpacity = 0.2;
-      let beamWidth = 30;
-      let length = 130;
-      
-      if (type === '4g700') {
-        length = 200;
-        fOpacity = 0.3;
-      }
-      if (type === '5g') {
-        length = 171; // Giảm 10% (190 * 0.9)
-        beamWidth = 24; // Giảm 20% (30 * 0.8)
-        color = '#00C853'; // Sắc nét hơn
-        fOpacity = 0.55; // Đậm hơn
-      } else if (type === '4g') {
-        beamWidth = 24; // Giảm 20%
-        color = '#FFD600'; // Yellow sắc nét
-        fOpacity = 0.45; // Đậm hơn
-      }
-
+      const color = this.getSectorColor(type);
+      const style = this.getSectorStyle(type);
+      const beamWidth = style.beamWidth;
+      const fOpacity = style.fillOpacity;
       // Static length reduction to 60%
-      length *= 0.6;
+      const length = style.length * 0.6;
 
       const origin = [lat, lng];
       const arcPts = [origin];
@@ -812,7 +1175,12 @@ export const MapManager = {
       // Grid 2 cột (thay vì bảng 1 cột 9 dòng) để popup thấp hơn hẳn — trên mobile
       // popup cao khiến Leaflet tự pan bản đồ đi xa để "nhét vừa", tạo cảm giác
       // chọn sector là bản đồ bị nhảy sang chỗ khác.
-      const popupHtml = `
+      // Dự án khai `sectorPopup` (CSDL) thì popup dựng từ đúng nhóm cột đó — chỉ đọc,
+      // không có nút sửa vì các cột này không nằm trong bộ trường mà updateSector ghi.
+      const groupRows = this.sectorGroupRows(sector);
+      const popupHtml = groupRows.length
+        ? this.sectorGroupPopupHtml(sector, sectorName, siteName, type, color, groupRows)
+        : `
         <div style="font-family:'Inter',sans-serif;font-size:12px;min-width:210px;max-width:250px;">
           <div style="font-weight:700;font-size:13px;margin-bottom:6px;color:${color};">${sectorName}</div>
           <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:4px 6px;">
@@ -902,7 +1270,7 @@ export const MapManager = {
 
       const lat = parseFloat(sector['Lat']);
       const lng = parseFloat(sector['Long']);
-      const azimuth = parseFloat(sector['Azimuth']) || 0;
+      const azimuth = this.sectorAzimuth(sector);
       if (!lat || !lng || isNaN(lat) || isNaN(lng)) return;
 
       const type = this.getSectorType(sector);
@@ -911,18 +1279,18 @@ export const MapManager = {
       const color = this.getSectorColor(type);
       const origin = [lat, lng];
 
-      const beamWidth = 30;
-      let length = 130;
-      if (type === '4g700') length = 200;
-      if (type === '5g') length = 190;
+      // Dùng chung bộ hình dạng với renderSectors để 2 màn hình vẽ giống hệt nhau
+      const style = this.getSectorStyle(type);
+      const beamWidth = style.beamWidth;
+      const length = style.length * 0.6;
 
       const arcPts = [origin];
       for (let a = azimuth - beamWidth; a <= azimuth + beamWidth; a += 5) {
         arcPts.push(this.destinationPoint(lat, lng, a, length));
       }
       arcPts.push(origin);
-      
-      const fOpacity = type === '5g' ? 0.35 : 0.18;
+
+      const fOpacity = style.fillOpacity;
       const shape = L.polygon(arcPts, {
         color: color, fillColor: color,
         fillOpacity: fOpacity, weight: 1.5, opacity: 0.7,
@@ -930,7 +1298,11 @@ export const MapManager = {
 
       const val = (v) => (v !== undefined && v !== null && String(v).trim() !== '') ? v : '-';
       const sectorName = sector['Sector'] || 'Unknown';
-      const popupHtml = `
+      // Cùng quy tắc với renderSectors: dự án khai `sectorPopup` thì lấy theo nhóm cột
+      const groupRows = this.sectorGroupRows(sector);
+      const popupHtml = groupRows.length
+        ? this.sectorGroupPopupHtml(sector, sectorName, siteName, type, color, groupRows)
+        : `
         <div style="font-family:'Inter',sans-serif;font-size:12px;min-width:210px;max-width:250px;">
           <div style="font-weight:700;font-size:13px;margin-bottom:6px;color:${color};">${sectorName}</div>
           <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:4px 6px;">

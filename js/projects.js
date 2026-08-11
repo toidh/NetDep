@@ -73,8 +73,90 @@ export const Projects = {
     return Array.isArray(f) ? f : [];
   },
 
+  /**
+   * Các dropdown lọc trên bản đồ (ngoài dropdown Tỉnh) — danh sách TÊN CỘT.
+   * Tên đặc biệt 'Status' = lọc theo Trạng thái tính được (Hoàn thành / Đang thực
+   * hiện / Chưa thực hiện), không phải theo cột nào trong sheet.
+   *
+   * Không khai = ['Danh sách'] để dự án 5G giữ nguyên bộ lọc Triển khai / Dự phòng.
+   * Cột không có trong dữ liệu thì dropdown tự ẩn (xem MapManager.buildFilterControls),
+   * nên dự án khác không còn hiện bộ lọc trống vô nghĩa như trước.
+   */
+  mapFilters() {
+    const f = this.current().mapFilters;
+    return Array.isArray(f) ? f : ['Danh sách'];
+  },
+
+  /**
+   * Tên cột THẬT trong dữ liệu ứng với `name`, hoặc null nếu không có.
+   *
+   * Sheet tiêu đề 2 tầng (Newsite khai groupRow) bị ghép tên thành "Nhóm - Tên cột",
+   * nên tra thẳng site['Tình trạng thuê'] luôn ra rỗng dù sheet có cột đó. Khớp
+   * theo hậu tố để khai trong registry vẫn viết tên cột như người dùng nhìn thấy.
+   */
+  resolveField(sites, name) {
+    if (!name) return null;
+    const rows = Array.isArray(sites) ? sites.slice(0, 20) : [sites];
+    const norm = (s) => String(s).toLowerCase().normalize('NFC').replace(/\s+/g, '');
+    const want = norm(name);
+
+    for (const row of rows) {
+      if (!row) continue;
+      const keys = Object.keys(row);
+      const hit = keys.find(k => norm(k) === want)
+               || keys.find(k => norm(k).endsWith('-' + want));
+      if (hit) return hit;
+    }
+    return null;
+  },
+
+  /** Mọi cột tiến độ cập nhật được của dự án (1 dropdown mỗi cột trong modal). */
+  progressFields() {
+    const f = this.current().progressFields;
+    return (Array.isArray(f) && f.length) ? f : [this.progressField()];
+  },
+
   checkinEnabled() {
     return this.current().checkinEnabled !== false;
+  },
+
+  /** Dự án có dùng khối Liên hệ (Đội/FT/TKTU) trong modal chi tiết trạm không. */
+  contactEnabled() {
+    return this.current().contactEnabled !== false;
+  },
+
+  /**
+   * Khối `name` trong modal chi tiết trạm có hiện không (registry `modalSections`).
+   * Mặc định hiện; chỉ khai `false` cho khối mà dự án không dùng — CSDL chỉ cần dropdown
+   * tiến độ nên ẩn gần hết. Khối Liên hệ vẫn dùng `contactEnabled` riêng như trước.
+   */
+  modalSection(name) {
+    const cfg = this.current().modalSections;
+    return !cfg || cfg[name] !== false;
+  },
+
+  /** Danh sách ảnh nên chụp khi đi kiểm tra, hiện trong modal chi tiết trạm. */
+  photoHints() {
+    const h = this.current().photoHints;
+    return Array.isArray(h) ? h.filter(x => String(x || '').trim()) : [];
+  },
+
+  /** Cột trong sheet để lưu link ảnh FT tải lên; '' = dự án không dùng. */
+  photoColumn() {
+    return String(this.current().photoColumn || '').trim();
+  },
+
+  /**
+   * Role `role` có được sửa dữ liệu của dự án đang xem không.
+   * admin/manager sửa mọi dự án; role khác chỉ khi dự án khai trong `editRoles`
+   * (FT sửa được ở CSDL nhưng không đụng được dự án khác).
+   * ⚠️ Đây chỉ để ẩn/hiện nút — backend kiểm tra lại theo Users, đừng bỏ bước đó.
+   */
+  canEdit(role) {
+    const r = String(role || '').trim().toLowerCase();
+    if (r === 'admin' || r === 'manager') return true;
+    const extra = this.current().editRoles;
+    return Array.isArray(extra) && extra.some(x => String(x).trim().toLowerCase() === r);
   },
 
   /** Dự án cho phép gõ toạ độ vào ô tìm kiếm để bay tới điểm đó. */

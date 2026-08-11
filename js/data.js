@@ -169,6 +169,8 @@ export const DataService = {
         project: Projects.currentId,
         site: siteData.site,
         progressValue: siteData.progressValue,
+        // Dự án nhiều cột tiến độ gửi map { tên cột: giá trị }
+        progressValues: siteData.progressValues,
         note: siteData.note,
         username: siteData.username,
       });
@@ -252,19 +254,48 @@ export const DataService = {
     return 'Chưa thực hiện';
   },
 
+  /** Chuẩn hoá để so khớp phân loại — phải khớp normalizeKey() trong Config.gs. */
+  _normKey(v) {
+    return String(v == null ? '' : v)
+      .toLowerCase()
+      .normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .replace(/\s+/g, '');
+  },
+
+  /**
+   * Những cột tiến độ cần xét để kết luận trạm đã Hoàn thành chưa.
+   * Bản sao của requiredProgressFields() trong Config.gs — có `statusRules` thì tập
+   * cột phụ thuộc phân loại của chính trạm đó (Swap: trạm 4G chỉ cần cột 4G).
+   */
+  requiredProgressFields(site) {
+    const project = Projects.current() || {};
+    const cfg = project.statusRules;
+
+    if (cfg && cfg.field && Array.isArray(cfg.rules) && cfg.rules.length) {
+      const val = this._normKey(site ? site[cfg.field] : '');
+      if (val) {
+        for (const r of cfg.rules) {
+          if (r && r.contains && val.includes(this._normKey(r.contains))) {
+            return r.require || [];
+          }
+        }
+      }
+      if (cfg.default) return cfg.default;
+    }
+
+    const fields = project.progressFields;
+    if (Array.isArray(fields) && fields.length) return fields;
+    return [Projects.progressField()];
+  },
+
   /**
    * Trạng thái của cả một trạm — bản sao của computeSiteStatus() trong Config.gs.
-   * Dự án khai `progressFields` (Swap: 4G + 5G) chỉ tính Hoàn thành khi TẤT CẢ các
-   * cột đều xong; chỉ có 1 cột đang dở thì vẫn là Đang thực hiện.
+   * Hoàn thành khi TẤT CẢ cột cần xét đều xong; còn 1 cột dở vẫn là Đang thực hiện.
    */
   computeSiteStatus(site) {
     if (!site) return 'Chưa thực hiện';
-    const project = Projects.current() || {};
-    const fields = project.progressFields;
-
-    if (!fields || !fields.length) {
-      return this.computeStatus(site[Projects.progressField()]);
-    }
+    const fields = this.requiredProgressFields(site);
+    if (!fields.length) return this.computeStatus(site[Projects.progressField()]);
 
     let done = 0, started = 0;
     fields.forEach(f => {
@@ -288,8 +319,14 @@ export const DataService = {
     const index = sites.findIndex(s => s['Site'] === siteData.site);
     if (index < 0) return;
 
-    const field = Projects.progressField();
-    sites[index][field] = siteData.progressValue;
+    if (siteData.progressValues && typeof siteData.progressValues === 'object') {
+      Object.keys(siteData.progressValues).forEach(f => {
+        sites[index][f] = siteData.progressValues[f];
+      });
+    }
+    if (siteData.progressValue !== undefined) {
+      sites[index][Projects.progressField()] = siteData.progressValue;
+    }
     sites[index]['Ghi chú (TKTU ONSITE)'] = siteData.note || '';
     sites[index]['User cập nhật'] = siteData.username || '';
     sites[index]['Ngày cập nhật'] = new Date().toLocaleString('vi-VN');
@@ -382,6 +419,19 @@ export const DataService = {
       case 'du_phong': return AppConfig.COLORS.DU_PHONG;
       default: return AppConfig.COLORS.DEFAULT;
     }
+  },
+
+  /**
+   * Màu của MỘT GIÁ TRỊ tiến độ (không phải cả trạm) — vd 'Phát sóng' → xanh lá.
+   * Dùng chung cho chú thích bản đồ và thẻ đếm ở Dashboard, để cùng một mốc luôn hiện
+   * đúng màu của marker trên bản đồ. Đi qua computeStatus() nên tự theo
+   * doneValues/inProgressValues của từng dự án.
+   */
+  progressValueColor(value) {
+    const s = this.computeStatus(value);
+    const status = s === 'Hoàn thành' ? 'completed'
+                 : (s === 'Đang thực hiện' ? 'in_progress' : 'default');
+    return this.getStatusColor(status);
   },
 
   getStatusLabel(status, site) {

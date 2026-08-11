@@ -951,6 +951,21 @@ html, body {
   display: flex;
 }
 
+/* Số dropdown thay đổi theo dự án (Swap/Newsite có 3 cái) — cho xuống dòng và giới hạn
+   bề ngang để trên mobile bộ lọc không tràn ra ngoài màn hình. */
+.map-filter-bar {
+  flex-wrap: wrap;
+  justify-content: center;
+  max-width: min(92vw, 560px);
+}
+
+/* Giá trị dài ("Đã tiếp xúc nhưng không cho thuê") làm select tự giãn rất rộng và đẩy
+   bộ lọc xuống nhiều dòng — chặn bề ngang, phần thừa cắt bớt khi đóng dropdown. */
+.map-filter-bar .map-filter-select {
+  max-width: 170px;
+  text-overflow: ellipsis;
+}
+
 .map-filter-select {
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-primary);
@@ -1466,17 +1481,21 @@ body.modal-open {
   backface-visibility: hidden;
 }
 
-/* Vạch lưới mờ chia bản đồ thành ô vuông = khe hở giữa các ô ảnh (tile), xảy ra khi
-   tỉ lệ hiển thị KHÔNG phải 100% (Windows scaling 125%/150%, hoặc zoom trình duyệt):
-   vị trí tile tính ra số lẻ pixel vật lý, trình duyệt làm tròn mỗi tile một kiểu nên
-   chừa lại khe ~1px. Nới mỗi tile thêm 0.5px để mép chồng nhẹ lên tile bên cạnh.
+/* ⚠️ KHÔNG nới kích thước tile (256 → 256.5px, hay +1 điểm ảnh vật lý) để "lấp khe".
+   Đã đo bằng ảnh chụp A/B trên cùng khung hình ở devicePixelRatio 1.25:
+     - tile 256px          -> bản đồ sạch, không vạch
+     - tile 256.8px (nới)  -> hiện rõ lưới vạch sáng đúng mỗi 256px
+   Lý do: ảnh gốc 256px bị nội suy lên kích thước lẻ nên mỗi tile có viền mờ ở mép;
+   tile vẽ sau đè viền mờ đó lên tile bên cạnh, thành đường kẻ. Tức là cách "fix" này
+   chính là nguyên nhân gây vạch, không phải thuốc chữa.
 
-   ⚠️ CHỈ bật khi tỉ lệ hiển thị lẻ (class do map.js gắn). Ở tỉ lệ 100% việc kéo giãn
-   256 → 256.5px khiến trình duyệt nội suy lại ảnh và TỰ SINH RA vạch sáng ở mép —
-   đúng thứ ta đang muốn khử. Đã kiểm chứng bằng ảnh chụp A/B. */
-.tile-seam-fix .leaflet-tile {
-  width: 256.5px !important;
-  height: 256.5px !important;
+   Nếu sau này thật sự gặp khe hở trên một thiết bị nào đó: chỉnh nền khung bản đồ bên
+   dưới cho khe chìm đi, ĐỪNG đụng vào kích thước tile. */
+
+/* Nền khung bản đồ: Leaflet mặc định #ddd (xám sáng) nên bất kỳ khe nào lọt ra cũng
+   thành vạch trắng chói trên ảnh vệ tinh. Để nền tối theo app thì gần như vô hình. */
+.leaflet-container {
+  background: #0a0e1a;
 }
 
 .leaflet-control-zoom {
@@ -1653,6 +1672,10 @@ body.modal-open {
 .dash-card.card-progress::before { background: var(--color-red); }
 .dash-card.card-pending::before { background: var(--text-muted); }
 
+/* Thẻ đếm theo mốc của dự án: màu do dashboard.js truyền vào (--card-accent), lấy đúng
+   màu marker của mốc đó trên bản đồ. Không có thì rơi về xám như thẻ thường. */
+.dash-card[style*="--card-accent"]::before { background: var(--card-accent, var(--text-muted)); }
+
 .dash-card-value {
   font-size: 28px;
   font-weight: 800;
@@ -1824,9 +1847,11 @@ body.modal-open {
 }
 
 /* === Dashboard responsive === */
+/* Số cột do dashboard.js đặt theo SỐ THẺ của dự án (--dash-cols): 3 thẻ thì 1 hàng 3
+   thẻ, 4 thẻ thì 2 hàng 2 thẻ — không để hàng cuối trơ một thẻ lẻ giữa khoảng trống. */
 @media (min-width: 600px) {
   .dash-summary {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(var(--dash-cols, 3), 1fr);
   }
 }
 
@@ -2311,6 +2336,76 @@ body[data-role="export"] .admin-only {
 #map.map-rotated .leaflet-marker-icon,
 #map.map-rotated .leaflet-popup {
   /* markers intentionally allowed to rotate with map for realism */
+}
+
+/* ============================================================
+   POPUP SECTOR (đối chiếu FT ↔ hậu kiểm + ảnh từng hạng mục)
+   ============================================================ */
+/* Leaflet để mặc định margin 13px/19px quanh nội dung popup — với bảng 4 cột của CSDL
+   thì gần 40px chiều ngang bị ăn mất, cột ảnh bị đẩy tràn ra ngoài khung trắng. */
+.sector-popup-wrap .leaflet-popup-content {
+  margin: 11px 13px;
+}
+/* ⚠️ KHÔNG đặt `width: auto !important` cho .leaflet-popup-content: Leaflet áp
+   `maxWidth` bằng cách gán thẳng width inline sau khi đo nội dung. Ghi đè width là vô
+   hiệu hoá luôn maxWidth — trên điện thoại popup phình ra 420px và tràn khỏi màn hình. */
+.sector-popup-wrap .leaflet-popup-content-wrapper {
+  border-radius: 10px;
+}
+/* Màn hình quá hẹp cho đủ 4 cột: cuộn ngang BÊN TRONG khung trắng, không để lưới
+   tràn ra ngoài viền popup (lúc đó nút ảnh nằm ngoài vùng bấm được). */
+.sector-popup-wrap .sector-popup {
+  overflow-x: auto;
+}
+
+/* Ô ảnh của một hạng mục: các chip số (mở ảnh) + nút ＋ (chụp/thêm ảnh) */
+.sector-photo-cell {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  /* Vừa đủ 2 chip ảnh + nút ＋ trên một dòng; từ ảnh thứ 3 mới xuống dòng */
+  min-width: 74px;
+}
+.sector-photo-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  text-decoration: none;
+  color: #0f172a;
+  background: #38bdf8;
+}
+.sector-photo-chip:hover {
+  background: #7dd3fc;
+}
+.sector-photo-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 20px;
+  padding: 0;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px dashed rgba(56, 189, 248, 0.55);
+  border-radius: 5px;
+  font-family: inherit;
+}
+.sector-photo-add:hover {
+  background: rgba(56, 189, 248, 0.25);
+}
+.sector-photo-add:active {
+  transform: scale(0.94);
 }
 
 /* Rotate/North button active states */

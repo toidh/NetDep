@@ -93,21 +93,52 @@ export const DashboardManager = {
     const pct = total > 0 ? ((completed / total) * 100).toFixed(2) : '0.00';
 
     // === Summary Cards ===
+    // Thẻ Tổng trạm luôn có. Hai thẻ Hoàn thành / Chưa hoàn thành chỉ là cách gộp thô
+    // của cột tiến độ — dự án theo dõi theo từng mốc riêng (Newsite) khai
+    // `dashboard.statusCards: false` để bỏ, tránh đếm cùng một dữ liệu hai kiểu.
+    let cardCount = 1;
     let cardsHtml = `
       <div class="dash-card card-total clickable-card" onclick="App.showSiteList('total', 'Tổng trạm')"><div class="dash-card-value">${total}</div><div class="dash-card-label">Tổng trạm</div></div>
-      <div class="dash-card card-completed clickable-card" onclick="App.showSiteList('completed', 'Hoàn thành')"><div class="dash-card-value">${completed}</div><div class="dash-card-label">Hoàn thành</div></div>
-      <div class="dash-card card-pending clickable-card" onclick="App.showSiteList('pending', 'Chưa hoàn thành')"><div class="dash-card-value">${notUpdated}</div><div class="dash-card-label">Chưa hoàn thành</div></div>
     `;
 
-    // Thẻ đếm theo từng mốc tiến độ riêng của dự án (vd Newsite: Chưa thuê / Phát sóng)
-    const field = Projects.progressField();
+    if (Projects.dashboardConfig().statusCards !== false) {
+      cardCount += 2;
+      cardsHtml += `
+      <div class="dash-card card-completed clickable-card" onclick="App.showSiteList('completed', 'Hoàn thành')"><div class="dash-card-value">${completed}</div><div class="dash-card-label">Hoàn thành</div></div>
+      <div class="dash-card card-pending clickable-card" onclick="App.showSiteList('pending', 'Chưa hoàn thành')"><div class="dash-card-value">${notUpdated}</div><div class="dash-card-label">Chưa hoàn thành</div></div>
+      `;
+    }
+
+    // Thẻ đếm theo từng mốc riêng của dự án (vd Newsite: Chưa thuê / Phát sóng).
+    // Mặc định đếm trên cột tiến độ, nhưng thẻ khai `field` thì đếm trên cột đó —
+    // Newsite theo dõi mặt bằng ở cột 'Tình trạng thuê' tách khỏi cột tiến độ, đếm
+    // 'Chưa thuê' trên cột tiến độ sẽ ra gần 0 vì cột đó chỉ điền khi đã bắt đầu lắp.
     Projects.valueCards().forEach(card => {
+      // Khai `field` mà sheet không có cột đó -> bỏ thẻ, KHÔNG lặng lẽ rơi về cột tiến
+      // độ rồi hiện một con số của cột khác hẳn với nhãn thẻ.
+      const field = card.field
+        ? Projects.resolveField(scoped, card.field)
+        : Projects.progressField();
+      if (!field) return;
       const want = String(card.value || '').trim().toLowerCase();
       const n = scoped.filter(s => String(s[field] || '').trim().toLowerCase() === want).length;
+      const filterId = 'value:' + encodeURIComponent(field) + ':' + encodeURIComponent(card.value);
+
+      // Màu thẻ = đúng màu marker của mốc đó trên bản đồ (Phát sóng xanh lá, Đã tích
+      // hợp đỏ, Tồn xanh dương) — cùng một hàm với chú thích bản đồ nên không bao giờ
+      // lệch nhau. Thẻ đếm trên cột khác cột tiến độ thì khai `color` trong registry.
+      const color = card.color || DataService.progressValueColor(card.value);
+      cardCount++;
       cardsHtml += `
-      <div class="dash-card clickable-card" onclick="App.showSiteList('progress:${encodeURIComponent(card.value)}', '${card.label}')"><div class="dash-card-value">${n}</div><div class="dash-card-label">${card.label}</div></div>`;
+      <div class="dash-card clickable-card" style="--card-accent:${color}" onclick="App.showSiteList('${filterId}', '${card.label}')"><div class="dash-card-value" style="color:${color}">${n}</div><div class="dash-card-label">${card.label}</div></div>`;
     });
-    document.getElementById('dash-summary').innerHTML = cardsHtml;
+
+    const summary = document.getElementById('dash-summary');
+    // Số cột theo SỐ THẺ để hàng cuối không trơ một thẻ lẻ: 4 thẻ -> 2 hàng 2 thẻ
+    // (Newsite), 3 thẻ -> 1 hàng 3 thẻ như cũ (5G/Swap).
+    // setProperty cần chuỗi, truyền số thì Chrome bỏ qua và giữ giá trị cũ.
+    summary.style.setProperty('--dash-cols', String(cardCount % 3 === 0 ? 3 : 2));
+    summary.innerHTML = cardsHtml;
 
     // === Progress Bar ===
     document.getElementById('dash-progress-fill').style.width = pct + '%';
