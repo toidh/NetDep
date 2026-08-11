@@ -263,11 +263,10 @@
       <select id="filter-district" class="map-filter-select" onchange="MapManager.applyFilters()">
         <option value="">🌍 Tất cả tỉnh</option>
       </select>
-      <select id="filter-status" class="map-filter-select" onchange="MapManager.applyFilters()">
-        <option value="" selected>📍 Tất cả</option>
-        <option value="trien_khai">🔵 Triển khai</option>
-        <option value="du_phong">🟠 Dự phòng</option>
-      </select>
+      <!-- Các dropdown còn lại do MapManager.buildFilterControls() dựng theo
+           `mapFilters` của dự án đang xem (5G: Danh sách, Swap: Phân loại + Trạng thái,
+           Newsite: Tình trạng thuê + Tiến độ Newsite). Ghi cứng ở đây là sai với dự án
+           không có cột 'Danh sách'. -->
     </div>
 
     <!-- Map Control Buttons -->
@@ -350,8 +349,8 @@
         <input type="file" id="checkin-camera" accept="image/*" capture="environment" style="display:none">
       </div>
 
-        <!-- Site Info -->
-        <div class="info-section">
+        <!-- Site Info — ẩn ở dự án khai modalSections.info:false trong registry -->
+        <div class="info-section" id="site-info-section">
           <div class="info-section-title">Thông tin trạm</div>
           <div class="info-grid info-grid-3col">
             <div class="info-item">
@@ -383,8 +382,8 @@
           </div>
         </div>
 
-        <!-- Connection Diagrams -->
-        <div class="media-container" style="display:flex;gap:10px;">
+        <!-- Connection Diagrams — ẩn ở dự án khai modalSections.media:false -->
+        <div class="media-container" id="media-section" style="display:flex;gap:10px;">
           <div class="info-section" id="diagram-section" style="flex:1;margin-bottom:0;">
             <div class="info-section-title">📋 Sơ đồ đấu nối</div>
             <div id="diagram-content"></div>
@@ -395,8 +394,8 @@
           </div>
         </div>
 
-        <!-- Integration Info -->
-        <div class="info-section">
+        <!-- Integration Info — ẩn ở dự án khai modalSections.integration:false -->
+        <div class="info-section" id="integration-section">
           <div class="info-section-title">🔌 Thông tin tích hợp</div>
           <div class="info-grid info-grid-3col">
             <div class="info-item">
@@ -419,8 +418,8 @@
           </div>
         </div>
 
-        <!-- Contact Info -->
-        <div class="info-section">
+        <!-- Contact Info — ẩn hẳn ở dự án khai contactEnabled:false trong registry -->
+        <div class="info-section" id="contact-section">
           <div class="info-section-title">Liên hệ</div>
           <div class="info-grid">
             <div class="info-item">
@@ -456,10 +455,32 @@
                 <button class="btn btn-call" id="call-sdt-tktu"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"></path></svg></button>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- NOTE — tách khỏi khối Liên hệ vì có dự án ẩn Liên hệ nhưng vẫn dùng NOTE -->
+        <div class="info-section" id="note-section">
+          <div class="info-grid">
             <div class="info-item full" style="background:rgba(255, 238, 0, 0.1); border:1px solid rgba(255, 238, 0, 0.3); border-radius: 6px;">
               <div class="info-item-label" style="color:#FFEE00; font-weight: bold;">NOTE <span id="modal-note-edit" style="cursor:pointer;opacity:0.6;font-size:11px;display:none;margin-left:5px;">✏️</span></div>
               <div class="info-item-value" id="modal-note-tktu" style="white-space: pre-wrap;">-</div>
             </div>
+          </div>
+        </div>
+
+        <!-- Gợi ý chụp ảnh kiểm soát — nội dung do registry (`photoHints`) quyết định,
+             dự án không khai thì App.renderPhotoHints() ẩn cả khối. -->
+        <div class="info-section" id="photo-hints-section" style="display:none;">
+          <div class="info-section-title">📷 Gợi ý chụp ảnh kiểm soát</div>
+          <ul id="photo-hints-list" style="margin:0;padding-left:18px;font-size:13px;line-height:1.7;color:var(--text-secondary);"></ul>
+
+          <!-- Chỗ FT chụp/chọn ảnh rồi tải lên Drive; chỉ hiện ở dự án khai photoColumn -->
+          <div id="photo-upload-box" style="display:none;margin-top:12px;">
+            <input type="file" id="photo-upload-input" accept="image/*" capture="environment" multiple style="display:none;">
+            <button type="button" id="photo-upload-btn" class="btn btn-secondary" style="width:100%;display:flex;justify-content:center;align-items:center;gap:8px;">
+              <span>📸</span> Chụp / tải ảnh kiểm soát
+            </button>
+            <div id="photo-upload-list" style="margin-top:8px;font-size:12px;line-height:1.8;"></div>
           </div>
         </div>
 
@@ -473,15 +494,13 @@
 
           <form id="update-form">
             <div class="update-grid">
-              <!-- Nhãn + lựa chọn được render động theo dự án đang xem (App.renderProgressField) -->
-              <div class="form-group" id="field-progress">
-                <label class="form-label" for="update-progress" id="update-progress-label">Tiến độ</label>
-                <select id="update-progress" class="form-select"></select>
-              </div>
+              <!-- Mỗi cột tiến độ của dự án 1 dropdown, render động theo registry
+                   (App.renderProgressField). Swap có 2 cột: Tiến độ 4G và 5G. -->
+              <div class="form-group full-width" id="progress-fields-container"></div>
               <!-- Các cột chỉ-đọc riêng của dự án (detailFields), render động -->
               <div class="form-group full-width" id="project-extra-fields" style="display:none;"></div>
               <div class="form-group full-width">
-                <label class="form-label">Lịch sử Ghi chú</label>
+                <label class="form-label" id="update-note-history-label" style="display:none;">Lịch sử Ghi chú</label>
                   <div id="update-note-history" style="background:rgba(255,255,255,0.03);border:1px solid var(--border-glass);padding:8px;border-radius:8px;font-size:13px;max-height:100px;overflow-y:auto;white-space:pre-wrap;color:var(--text-muted);margin-bottom:8px;display:none;"></div>
                   <label class="form-label" for="update-note">Thêm ghi chú mới</label>
                   <textarea id="update-note" class="form-textarea"
@@ -569,8 +588,9 @@
           </div>
         </div>
         
-        <!-- Row 2: Phân loại -->
-        <div class="dash-section" style="display:flex;gap:15px;flex-wrap:wrap;margin-top:15px;">
+        <!-- Row 2: Phân loại — ẩn cả khối khi dự án chỉ có 1 cột nhóm (xem ChartManager),
+             nếu chỉ ẩn canvas thì còn trơ lại một khung rỗng cao 380px -->
+        <div class="dash-section" id="chart-class-section" style="display:flex;gap:15px;flex-wrap:wrap;margin-top:15px;">
           <div style="flex:1;min-width:300px;height:350px;overflow-x:auto;">
             <div style="min-width:450px;height:100%;position:relative;">
               <canvas id="chart-class"></canvas>
@@ -578,8 +598,19 @@
           </div>
         </div>
 
-        <!-- Row 3: Biểu đồ đường hoàn thành theo ngày -->
-        <div class="dash-section" style="margin-top:15px;">
+        <!-- Biểu đồ theo tháng của dự án khai `dashboard.monthChart` (Newsite: Ngày phát
+             sóng). Dự án không khai / sheet thiếu cột -> ChartManager ẩn cả khối này. -->
+        <div class="dash-section" id="chart-month-section" style="margin-top:15px;display:none;">
+          <div style="background:rgba(255,255,255,0.03);padding:15px;border-radius:12px;border:1px solid var(--border-glass);">
+            <div id="chart-month-title" style="font-size:13px;font-weight:600;color:#fff;margin-bottom:8px;border-left:3px solid #10b981;padding-left:8px;"></div>
+            <div style="height:280px;position:relative;">
+              <canvas id="chart-month"></canvas>
+            </div>
+          </div>
+        </div>
+
+        <!-- Row 3: Biểu đồ đường hoàn thành theo ngày (dự án khai dailyCharts:false thì ẩn) -->
+        <div class="dash-section" id="chart-daily-section" style="margin-top:15px;">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
             <div style="font-size:14px;font-weight:600;border-left:3px solid var(--color-green);padding-left:8px;color:#fff;">
               Số trạm hoàn thành theo ngày
@@ -596,8 +627,8 @@
           </div>
         </div>
 
-        <!-- Tiến độ ngày theo Đối tác (Tỉnh) -->
-        <div class="dash-section" style="margin-top:15px;">
+        <!-- Tiến độ ngày theo Đối tác (Tỉnh) (dự án khai dailyCharts:false thì ẩn) -->
+        <div class="dash-section" id="chart-daily-partner-section" style="margin-top:15px;">
           <div style="background:rgba(255,255,255,0.03);padding:15px;border-radius:12px;border:1px solid var(--border-glass);">
             <div style="font-size:13px;font-weight:600;color:#fff;margin-bottom:8px;border-left:3px solid #10b981;padding-left:8px;">Tiến độ ngày theo Đối tác (Tỉnh) — Số trạm hoàn thành trong ngày</div>
             <div style="height:280px;position:relative;overflow-x:auto;">
